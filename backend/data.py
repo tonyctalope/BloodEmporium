@@ -147,7 +147,7 @@ class Data:
         "rare": 3250,
         "very_rare": 4000,
         "ultra_rare": 5000,
-        "event": 2000,
+        "event": 4000,
         "varies": 5000, # assume worst case
     }
 
