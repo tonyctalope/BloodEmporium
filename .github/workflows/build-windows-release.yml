@@ -11,9 +11,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Version for this release, e.g. 1.2.21-fork.2
+        description: Version for this release, e.g. 1.2.21-fork.4
         required: true
-        default: 1.2.21-fork.2
+        default: 1.2.21-fork.4
       upstream_version:
         description: Upstream release to harvest the native dependencies from
         required: true
@@ -90,8 +90,20 @@ jobs:
           venv\Scripts\python.exe -m pip install --upgrade pip wheel
           venv\Scripts\python.exe -m pip install -r requirements.txt
           # imported by backend/node_detection.py but missing from requirements.txt; Pillow produces the icon
-          venv\Scripts\python.exe -m pip install pytesseract Pillow
+          venv\Scripts\python.exe -m pip install pytesseract Pillow==10.4.0
+          # PyAutoGUI 0.9.53 leaves pyscreeze unpinned (>=0.1.21) and does
+          #   from pyscreeze import center, grab, ...
+          # inside try/except ImportError. pyscreeze 1.0.0 removed grab(), so resolving the latest version
+          # makes that import fail SILENTLY: pyautogui replaces screenshot() with a stub that raises on first
+          # use, which a frozen build only reaches on the user's machine. Pin the era-correct version.
+          venv\Scripts\python.exe -m pip install pyscreeze==0.1.28
           venv\Scripts\python.exe -c "import torch, torchvision, ultralytics, PyQt5, cv2, skimage, pytesseract, pynput; print('imports ok, torch', torch.__version__)"
+
+      - name: Check pyautogui is functional, not silently stubbed
+        run: |
+          # hasattr proves the pyscreeze import inside pyautogui succeeded; the screenshot exercises
+          # pyscreeze -> Pillow -> GDI for real (the runner has an interactive desktop)
+          venv\Scripts\python.exe -c "import pyautogui, pyscreeze; assert all(hasattr(pyscreeze, n) for n in ['center', 'grab', 'pixel', 'pixelMatchesColor', 'screenshot']), 'pyscreeze is missing names pyautogui needs'; img = pyautogui.screenshot(); print('venv screenshot ok', img.size)"
 
       - name: Produce the icon that references/ would have held
         run: venv\Scripts\python.exe packaging\make_icon.py
@@ -124,6 +136,21 @@ jobs:
 
       - name: Check every imported DLL is in the bundle
         run: python packaging\check_bundle_dlls.py "dist\Blood Emporium"
+
+      - name: Self-check the frozen build
+        run: |
+          # runs the app's --selfcheck entry point INSIDE the frozen bundle: pyautogui screenshot (the call
+          # that starting a run makes first) and both model loads, including the harvested C++ extension.
+          # The exe is windowed so it has no stdout; it writes selfcheck.txt and reports through its exit code.
+          $p = Start-Process -FilePath (Resolve-Path 'dist\Blood Emporium\Blood Emporium.exe') `
+               -ArgumentList '--selfcheck' -WorkingDirectory 'dist\Blood Emporium' -Wait -PassThru
+          if (Test-Path 'dist\Blood Emporium\selfcheck.txt') {
+              Get-Content 'dist\Blood Emporium\selfcheck.txt'
+              Remove-Item 'dist\Blood Emporium\selfcheck.txt'
+          } else {
+              Write-Host 'selfcheck.txt was not written'
+          }
+          if ($p.ExitCode -ne 0) { throw "frozen self-check failed with exit code $($p.ExitCode)" }
 
       - name: Smoke test the frozen build
         run: |

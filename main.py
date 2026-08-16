@@ -890,10 +890,51 @@ def restart():
     subprocess.Popen([sys.executable] + sys.argv)
     sys.exit()
 
+def selfcheck():
+    """
+    Exercises the runtime dependencies the GUI only touches once a run starts, none of which merely importing
+    this module proves work. pyautogui in particular wraps its pyscreeze import in try/except and silently
+    replaces screenshot() with a stub that raises on first use - which a frozen build reaches on the user's
+    machine, not the build machine. Writes selfcheck.txt and exits 0/1 so a windowed (console-less) build can
+    still report the result to CI.
+    """
+    import traceback
+    lines = []
+    try:
+        import pyscreeze
+        # the exact names main.py's State eventually needs; missing ones are stubbed, not import errors
+        for name in ["center", "grab", "pixel", "pixelMatchesColor", "screenshot"]:
+            assert hasattr(pyscreeze, name), f"pyscreeze {pyscreeze.__version__} has no {name}"
+        lines.append(f"pyscreeze {pyscreeze.__version__}: ok")
+
+        from backend.image import CVImage
+        capture = CVImage.screen_capture() # the first call a run makes, via pyautogui.screenshot()
+        lines.append(f"screen capture: ok {capture.bgr.shape}")
+
+        from backend.node_detection import NodeDetection
+        NodeDetection()
+        lines.append("node model: ok")
+
+        from backend.edge_detection import EdgeDetection
+        EdgeDetection() # loads the harvested nms_rotated_ext extension against the bundled torch
+        lines.append("edge model: ok")
+
+        ok = True
+    except Exception:
+        lines.append(traceback.format_exc())
+        ok = False
+
+    with open("selfcheck.txt", "w") as f:
+        f.write(("OK" if ok else "FAIL") + "\n" + "\n".join(lines) + "\n")
+    sys.exit(0 if ok else 1)
+
 if __name__ == "__main__":
     freeze_support() # --onedir (for exe)
     Config(True) # validate config
     Runtime(True) # validate runtime settings
+
+    if "--selfcheck" in sys.argv:
+        selfcheck()
 
     os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
     os.environ["QT_SCALE_FACTOR_ROUNDING_POLICY"] = "PassThrough" # https://stackoverflow.com/questions/49277657/qt-creator-too-big-on-3840x2160-and-150-scaling-on-windows-10 / https://github.com/COVESA/dlt-viewer/issues/205
