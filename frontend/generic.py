@@ -42,10 +42,50 @@ class HyperlinkTextLabel(QLabel):
         self.setTextInteractionFlags(Qt.TextBrowserInteraction)
         self.setOpenExternalLinks(True)
 
-class TextInputBox(QLineEdit):
-    on_focus_in_callback = lambda: None
-    on_focus_out_callback = lambda: None
+class HotkeyListenerControl:
+    """
+    Single point of control for the global run/terminate hotkey listener.
 
+    Widgets suspend the listener while they have keyboard focus, so that typing cannot trigger a run.
+    Suspends are reference counted: an unbalanced resume used to start a second listener without stopping
+    the first, and every extra listener calls run_terminate() again on the same key press. Two listeners
+    therefore run and immediately terminate, which looks like the hotkey doing nothing at all.
+    """
+    on_suspend = staticmethod(lambda: None)
+    on_resume = staticmethod(lambda: None)
+    __depth = 0
+
+    @classmethod
+    def suspend(cls):
+        cls.__depth += 1
+        if cls.__depth == 1:
+            cls.on_suspend()
+
+    @classmethod
+    def resume(cls):
+        if cls.__depth == 0:
+            return # unpaired resume: the listener is already running
+        cls.__depth -= 1
+        if cls.__depth == 0:
+            cls.on_resume()
+
+class HotkeySuspendingInput:
+    """
+    Mixin pairing each suspend with exactly one resume, per widget. Read only inputs still receive focus
+    events, and setReadOnly can be toggled while the widget is focused, so the pairing cannot be inferred
+    from isReadOnly() at focus-out time alone.
+    """
+    def suspend_hotkey_listener(self):
+        if not getattr(self, "_hotkey_suspended", False):
+            self._hotkey_suspended = True
+            HotkeyListenerControl.suspend()
+
+    def resume_hotkey_listener(self):
+        if getattr(self, "_hotkey_suspended", False):
+            self._hotkey_suspended = False
+            HotkeyListenerControl.resume()
+
+class TextInputBox(QLineEdit, HotkeySuspendingInput):
     def __init__(self, parent, object_name, size, placeholder_text, text=None, font=Font(10),
                  style_sheet=StyleSheets.text_box):
         QLineEdit.__init__(self, parent)
@@ -61,17 +101,17 @@ class TextInputBox(QLineEdit):
         super().focusInEvent(event)
         if not self.isReadOnly():
             QTimer.singleShot(0, self.selectAll)
-            TextInputBox.on_focus_in_callback()
+            self.suspend_hotkey_listener()
 
     def focusOutEvent(self, event: QtGui.QFocusEvent) -> None:
         super().focusOutEvent(event)
-        TextInputBox.on_focus_out_callback()
+        self.resume_hotkey_listener()
 
     def setReadOnly(self, a0: bool) -> None:
         super().setReadOnly(a0)
         self.setStyleSheet(StyleSheets.text_box if not a0 else StyleSheets.text_box_read_only)
 
-class MultiLineTextInputBox(QPlainTextEdit):
+class MultiLineTextInputBox(QPlainTextEdit, HotkeySuspendingInput):
     def __init__(self, parent, object_name, width, height, full_height, placeholder_text, text=None, font=Font(10),
                  style_sheet=StyleSheets.multiline_text_box):
         super().__init__(parent)
@@ -108,13 +148,15 @@ class MultiLineTextInputBox(QPlainTextEdit):
         super().focusInEvent(event)
         if not self.isReadOnly():
             self.animate()
-            TextInputBox.on_focus_in_callback()
+            self.suspend_hotkey_listener()
 
     def focusOutEvent(self, event: QtGui.QFocusEvent) -> None:
         super().focusOutEvent(event)
         if not self.isReadOnly():
             self.animate()
-            TextInputBox.on_focus_out_callback()
+        # resumed unconditionally: setReadOnly(True) can be called while this widget is focused (see the
+        # preferences page switching to a bundled profile), which would otherwise never resume the listener
+        self.resume_hotkey_listener()
 
     def animate(self):
         self.animation = QPropertyAnimation(self, b"minimumHeight")
@@ -238,48 +280,57 @@ class Icons:
     twitter = __base + "/icon_twitter.png"
 
 # TODO space shouldnt deselect
-class HotkeyInput(QPushButton):
-    def __init__(self, parent, object_name, size, on_activate, on_deactivate):
+class HotkeyInput(QPushButton, HotkeySuspendingInput):
+    def __init__(self, parent, object_name, size):
         super().__init__(parent)
-        self.on_activate = on_activate # on activating THIS button
-        self.on_deactivate = on_deactivate # on deactivating THIS button
         self.pressed_keys = []
         self.pressed_keys_cache = []
+        self.active = False
+        self.listener = None
         self.setObjectName(object_name)
         self.setFixedSize(size)
         self.setStyleSheet(StyleSheets.button)
         self.set_keys(Config().hotkey())
         self.setFont(Font(10))
         self.clicked.connect(self.on_click)
-        self.active = False
-        self.listener = None
         self.setCursor(QCursor(Qt.PointingHandCursor))
 
     def on_click(self):
         if self.active:
-            self.set_keys(self.pressed_keys_cache)
-            self.setStyleSheet(StyleSheets.button)
-            self.on_deactivate()
-            self.stop_recording_listener()
-            self.active = False
+            self.set_keys(self.pressed_keys_cache) # cancelled: restore what was showing before recording
+            self.stop_recording()
         else:
-            self.pressed_keys_cache = self.pressed_keys
+            self.pressed_keys_cache = list(self.pressed_keys)
             self.pressed_keys = []
             self.setStyleSheet(StyleSheets.button_recording)
             self.setText("Recording keystrokes...")
-            self.on_activate()
-            self.start_recording_listener()
             self.active = True
+            self.suspend_hotkey_listener()
+            self.start_recording_listener()
+
+    def stop_recording(self):
+        """Idempotent: a combination emits one key release per key, but only the first ends the recording."""
+        if not self.active:
+            return
+        self.active = False
+        self.stop_recording_listener()
+        self.setStyleSheet(StyleSheets.button)
+        self.resume_hotkey_listener()
 
     def start_recording_listener(self):
+        self.stop_recording_listener() # never leave a previous listener running
         self.listener = keyboard.Listener(on_press=self.on_key_down, on_release=self.on_key_up)
         self.listener.start()
 
     def stop_recording_listener(self):
+        if self.listener is None:
+            return
         self.listener.stop()
         self.listener = None
 
     def on_key_down(self, key):
+        if not self.active or self.listener is None:
+            return
         key = TextUtil.pynput_to_key_string(self.listener, key)
         if key is None:
             return
@@ -287,19 +338,18 @@ class HotkeyInput(QPushButton):
         self.setText(" + ".join([TextUtil.title_case(k) for k in self.pressed_keys]))
 
     def on_key_up(self, key):
-        key = TextUtil.pynput_to_key_string(self.listener, key)
-        if key is None:
+        # releasing any key ends the recording; the remaining releases of the combination land here with the
+        # listener already torn down, which used to raise AttributeError inside the listener thread
+        if not self.active or self.listener is None:
+            return
+        if TextUtil.pynput_to_key_string(self.listener, key) is None:
             return
 
         self.setText(" + ".join([TextUtil.title_case(k) for k in self.pressed_keys]))
-
-        self.active = False
-        self.stop_recording_listener()
-        self.on_deactivate()
-        self.setStyleSheet(StyleSheets.button)
+        self.stop_recording()
 
     def set_keys(self, pressed_keys):
-        self.pressed_keys = pressed_keys
+        self.pressed_keys = list(pressed_keys)
         self.setText(" + ".join([TextUtil.title_case(k) for k in self.pressed_keys]))
 
 class ScrollBar(QScrollBar):

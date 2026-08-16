@@ -36,7 +36,9 @@ A [video guide](https://www.youtube.com/watch?v=3GFwQaB06Ug) is available for a 
 - Two speeds: slow (accurate) and fast.
 - Bloodpoint spend limit / prestige level limit.
 - Automatic termination upon bloodpoint depletion.
-- Hotkey to run / stop the program (default: Ctrl + Alt + 9).
+- Hotkey to run / stop the program (default: Ctrl + Alt + 9), rebindable in `Settings`.
+- Per-unlockable node click offset, for unlockables whose in-game hitbox does not cover the centre of their
+  icon (see [this bug report](https://bugreport.deadbydaylight.com/projects/pr-5642738318/issues/1913)).
 - Auto-purchase when all unlockables in a bloodweb are below a certain desirability threshold.
 - Completely automatic and hands-free - and now, fast!
 
@@ -55,6 +57,26 @@ A [video guide](https://www.youtube.com/watch?v=3GFwQaB06Ug) is available for a 
     - Subtier allows for preference within a tier e.g. tier 3 subtier 3 is higher priority than tier 3 subtier 2.
 - Each profile can store a different set of preferences, for easy switching when required.
 - You can import and export profiles as `.emp` files to share with others.
+
+### Node Click Offset
+Some unlockables have a misaligned hitbox in game, and a click on the centre of their icon does nothing
+(see [this bug report](https://bugreport.deadbydaylight.com/projects/pr-5642738318/issues/1913)). `Settings` →
+`Node Click Offset` moves the click away from the centre of the icon, for those unlockables only. One entry
+per line:
+
+```
+unlockable, horizontal %, vertical %
+```
+
+where the unlockable is its in-game name or its id as it appears in `config.json`, and the percentages are
+relative to the size of the icon on screen - so the same entry works at any resolution. Negative is left / up,
+and the maximum is 40% (beyond that the click leaves the icon). For example:
+
+```
+Iridescent Head, 0, -25
+```
+
+clicks a quarter of the way above the centre of Iridescent Head, and leaves every other unlockable alone.
 
 ## Notes
 - Shaders, game filters, and colourblind modes must be disabled while using this program,

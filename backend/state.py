@@ -114,6 +114,7 @@ class StateProcess(Process):
         Process.__init__(self)
         self.pipe = pipe
         self.args = args
+        self.node_click_offsets = {}
 
     def wait(self, grab_time: float, num_nodes_claimed: int, slow: bool):
         time_since_grab = time.time() - grab_time
@@ -126,6 +127,47 @@ class StateProcess(Process):
         self.click()
 
         time.sleep(StateProcess.LEVEL_GEN_TIME)
+
+    def resolve_node_click_offsets(self, configured_offsets, unlockables):
+        """
+        Maps each configured unlockable, given either as an in-game name or as a unique id, onto the unique id
+        the detector reports for a node. Unresolved entries are reported rather than silently ignored: a typo
+        would otherwise look exactly like an offset that simply has no effect.
+        """
+        self.node_click_offsets = {}
+        if len(configured_offsets) == 0:
+            return
+
+        ids_by_key = {unique_id.lower(): unique_id for unique_id in unlockables}
+        for unique_id, unlockable in unlockables.items():
+            ids_by_key.setdefault(unlockable.name.lower(), unique_id)
+
+        for key, offset in configured_offsets.items():
+            unique_id = ids_by_key.get(key)
+            if unique_id is None:
+                print(f"node click offset: no unlockable named \"{key}\", ignoring it")
+                continue
+            self.node_click_offsets[unique_id] = offset
+            print(f"node click offset: {unique_id} at {offset[0]:g}%, {offset[1]:g}% from its centre")
+
+    def node_click_position(self, node):
+        """
+        :return: where to click the node - its centre, unless an offset is configured for that unlockable to
+                 work around an in-game hitbox that does not cover the whole icon
+        """
+        offset = self.node_click_offsets.get(node.name)
+        if offset is None:
+            return node.x, node.y
+
+        x_percent, y_percent = offset
+        width, height = abs(node.x2 - node.x1), abs(node.y2 - node.y1)
+        x = node.x + round(width * x_percent / 100)
+        y = node.y + round(height * y_percent / 100)
+
+        # stay inside the detected icon, whatever the configured offset and the icon's size on screen
+        x = min(max(x, min(node.x1, node.x2)), max(node.x1, node.x2))
+        y = min(max(y, min(node.y1, node.y2)), max(node.y1, node.y2))
+        return x, y
 
     def click_node(self):
         if self.interaction == "press":
@@ -296,6 +338,7 @@ class StateProcess(Process):
             print(f"initialising ({State.version})")
             print(f"merging")
             unlockables = {u.unique_id: u for u in Data.get_unlockables()}
+            self.resolve_node_click_offsets(config.node_click_offsets(), unlockables)
             are_custom_icons = [is_custom_icon for u in unlockables.values() for is_custom_icon in u.are_custom_icons]
             num_custom = len([is_custom_icon for is_custom_icon in are_custom_icons if is_custom_icon])
             print(f"using {num_custom} custom icons and {len(are_custom_icons) - num_custom} vanilla icons")
@@ -536,7 +579,7 @@ class StateProcess(Process):
 
                     # select node: press OR hold on the node for 0.3s
                     grab_time = time.time()
-                    self.move_to(best_node.x, best_node.y)
+                    self.move_to(*self.node_click_position(best_node))
                     self.click_node()
 
                     # mystery box: click

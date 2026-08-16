@@ -12,7 +12,7 @@ from PyQt5.QtWidgets import QApplication, QLabel, QWidget, QMainWindow, QFrame, 
     QGraphicsDropShadowEffect, QStackedWidget, QSizeGrip, QMessageBox, QSplashScreen
 
 from frontend.dialogs import UpdateDialog, UpdatingDialog
-from frontend.generic import Font, TextLabel, HyperlinkTextLabel, TextInputBox, Icons
+from frontend.generic import Font, TextLabel, HyperlinkTextLabel, Icons, HotkeyListenerControl
 from frontend.layouts import RowLayout
 from frontend.pages.bloodweb import BloodwebPage
 from frontend.pages.help import HelpPage
@@ -633,8 +633,8 @@ class MainWindow(QMainWindow):
         # stack: settingsPage
         self.settingsPage = SettingsPage(self.run_terminate, self.bloodwebPage)
         self.settingsButton.setPage(self.settingsPage)
-        TextInputBox.on_focus_in_callback = self.settingsPage.stop_hotkey_listener
-        TextInputBox.on_focus_out_callback = self.settingsPage.start_hotkey_listener
+        HotkeyListenerControl.on_suspend = self.settingsPage.stop_hotkey_listener
+        HotkeyListenerControl.on_resume = self.settingsPage.start_hotkey_listener
         self.settingsPage.start_hotkey_listener()
 
         # bottom bar

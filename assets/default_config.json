@@ -3,6 +3,7 @@
     "hotkey": "ctrl alt 9",
     "interaction": "press",
     "primary_mouse": "left",
+    "node_click_offsets": {},
     "width": 1570,
     "height": 870,
     "x": -1,

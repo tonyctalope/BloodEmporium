@@ -1,12 +1,12 @@
 import os
 import sys
 
-from PyQt5.QtCore import QSize, QTimer, Qt
+from PyQt5.QtCore import QSize, QTimer, Qt, pyqtSignal
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QFileDialog, QGridLayout
 from pynput import keyboard
 
 from frontend.generic import Font, TextLabel, TextInputBox, Button, HotkeyInput, ScrollAreaContent, ScrollBar, \
-    ScrollArea, Selector
+    ScrollArea, Selector, MultiLineTextInputBox, HotkeyListenerControl
 from frontend.layouts import RowLayout
 from frontend.stylesheets import StyleSheets
 
@@ -16,6 +16,10 @@ from backend.config import Config
 from backend.util.text_util import TextUtil
 
 class SettingsPage(QWidget):
+    # the hotkey listener runs on a pynput thread; run_terminate touches widgets, so it has to be handed back
+    # to the GUI thread rather than called directly from the listener callback
+    hotkey_pressed = pyqtSignal()
+
     def set_path(self):
         icon_dir = QFileDialog.getExistingDirectory(self, "Select Icon Folder", self.pathText.text())
         if icon_dir != "":
@@ -48,13 +52,25 @@ class SettingsPage(QWidget):
             return
 
         hotkey = self.hotkeyInput.pressed_keys
+        if len(hotkey) == 0:
+            self.show_settings_page_save_fail_text("Click the hotkey field and press the key combination you want "
+                                                   "before saving. Changes not saved.")
+            return
+
+        try:
+            node_click_offsets = Config.parse_node_click_offsets(self.nodeClickOffsetText.toPlainText())
+        except ValueError as e:
+            self.show_settings_page_save_fail_text(f"{e} Changes not saved.")
+            return
 
         config = Config()
         config.set_path(path)
         config.set_hotkey(hotkey)
         config.set_interaction(self.interactionSelector.currentText())
         config.set_primary_mouse(self.primaryMouseSelector.currentText())
+        config.set_node_click_offsets(node_click_offsets)
         self.config_cache = Config()
+        self.refresh_hotkey_keys()
         self.bloodweb_page.refresh_run_description()
         self.show_settings_page_save_success_text("Settings saved.")
 
@@ -63,42 +79,62 @@ class SettingsPage(QWidget):
         self.hotkeyInput.set_keys(self.config_cache.hotkey())
         self.interactionSelector.setCurrentIndex(self.interactionSelector.findText(self.config_cache.interaction()))
         self.primaryMouseSelector.setCurrentIndex(self.primaryMouseSelector.findText(self.config_cache.primary_mouse()))
+        self.nodeClickOffsetText.setPlainText(Config.format_node_click_offsets(self.config_cache.node_click_offsets()))
+        self.refresh_hotkey_keys()
         self.show_settings_page_save_success_text("Settings reverted to last saved state.")
 
+    def refresh_hotkey_keys(self):
+        """Cached so the listener thread does not re-read config.json on every single key press."""
+        self.hotkey_keys = set(self.config_cache.hotkey())
+
     def start_hotkey_listener(self):
+        self.stop_hotkey_listener() # never leave a previous listener running: two listeners toggle run twice
+        self.pressed_keys = [] # keys released while stopped were never seen, so start from a clean state
+        self.hotkey_triggered = False
         self.hotkey_listener = keyboard.Listener(on_press=self.on_key_down, on_release=self.on_key_up)
         self.hotkey_listener.start()
 
     def stop_hotkey_listener(self):
+        if self.hotkey_listener is None:
+            return
         self.hotkey_listener.stop()
         self.hotkey_listener = None
 
     def on_key_down(self, key):
-        if self.hotkey_listener is not None:
-            key = TextUtil.pynput_to_key_string(self.hotkey_listener, key)
-            if key is None:
-                return
-            self.pressed_keys = list(dict.fromkeys(self.pressed_keys + [key]))
-            if sorted(self.pressed_keys) == sorted(Config().hotkey()):
-                self.run_terminate()
+        listener = self.hotkey_listener
+        if listener is None:
+            return
+        key = TextUtil.pynput_to_key_string(listener, key)
+        # only keys belonging to the hotkey are tracked, so an unrelated key held down (or one whose release
+        # was missed while the listener was stopped) can never stop the hotkey from matching
+        if key is None or key not in self.hotkey_keys:
+            return
+        if key not in self.pressed_keys:
+            self.pressed_keys.append(key)
+        if len(self.pressed_keys) == len(self.hotkey_keys) and not self.hotkey_triggered:
+            self.hotkey_triggered = True # edge triggered: key auto-repeat would otherwise toggle run repeatedly
+            self.hotkey_pressed.emit()
 
     def on_key_up(self, key):
-        if self.hotkey_listener is not None:
-            key = TextUtil.pynput_to_key_string(self.hotkey_listener, key)
-            if key is None:
-                return
-            try:
-                self.pressed_keys.remove(key)
-            except ValueError:
-                pass
+        listener = self.hotkey_listener
+        if listener is None:
+            return
+        key = TextUtil.pynput_to_key_string(listener, key)
+        if key is None or key not in self.hotkey_keys:
+            return
+        if key in self.pressed_keys:
+            self.pressed_keys.remove(key)
+        self.hotkey_triggered = False
 
     def __init__(self, run_terminate, bloodweb_page):
         super().__init__()
         self.hotkey_listener = None
         self.pressed_keys = []
+        self.hotkey_triggered = False
         self.config_cache = Config()
+        self.refresh_hotkey_keys()
         self.setObjectName("settingsPage")
-        self.run_terminate = run_terminate
+        self.hotkey_pressed.connect(run_terminate)
         self.bloodweb_page = bloodweb_page
 
         self.layout = QGridLayout(self)
@@ -141,8 +177,26 @@ class SettingsPage(QWidget):
         self.hotkeyDescription = TextLabel(self, "settingsPageHotkeyDescription",
                                            "Shortcut to run or terminate the automatic bloodweb process.", Font(10))
 
-        self.hotkeyInput = HotkeyInput(self, "settingsPageHotkeyInput", QSize(300, 40),
-                                       self.stop_hotkey_listener, self.start_hotkey_listener)
+        self.hotkeyInput = HotkeyInput(self, "settingsPageHotkeyInput", QSize(300, 40))
+
+        self.nodeClickOffsetLabel = TextLabel(self, "settingsPageNodeClickOffsetLabel", "Node Click Offset", Font(12))
+        self.nodeClickOffsetDescription = TextLabel(self, "settingsPageNodeClickOffsetDescription",
+                                                    "<p style=line-height:125%>"
+                                                    "Some unlockables have a misaligned hitbox in game and ignore a "
+                                                    "click on the centre of their icon "
+                                                    "(bugreport.deadbydaylight.com/projects/pr-5642738318/issues/1913)."
+                                                    "<br>One entry per line: "
+                                                    "<i>unlockable, horizontal %, vertical %</i>, where the "
+                                                    "percentages shift the click away from the centre of the icon "
+                                                    "(negative is left / up, maximum 40).<br>The unlockable is its "
+                                                    "in-game name or its id as it appears in config.json, e.g. "
+                                                    "<i>Iridescent Head, 0, -25</i> to click a quarter of the way "
+                                                    "above the centre.</p>", Font(10))
+        self.nodeClickOffsetDescription.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.nodeClickOffsetText = MultiLineTextInputBox(self, "settingsPageNodeClickOffsetText", 550, 60, 120,
+                                                         "unlockable, horizontal %, vertical %",
+                                                         Config.format_node_click_offsets(
+                                                             self.config_cache.node_click_offsets()))
 
         self.accessibilityLabel = TextLabel(self, "settingsPageAccessibilityLabel", "Accessibility Options", Font(12))
 
@@ -199,6 +253,9 @@ class SettingsPage(QWidget):
         self.scrollAreaContentLayout.addWidget(self.hotkeyLabel)
         self.scrollAreaContentLayout.addWidget(self.hotkeyDescription)
         self.scrollAreaContentLayout.addWidget(self.hotkeyInput)
+        self.scrollAreaContentLayout.addWidget(self.nodeClickOffsetLabel)
+        self.scrollAreaContentLayout.addWidget(self.nodeClickOffsetDescription)
+        self.scrollAreaContentLayout.addWidget(self.nodeClickOffsetText)
         self.scrollAreaContentLayout.addWidget(self.accessibilityLabel)
         self.scrollAreaContentLayout.addWidget(self.interactionRow)
         self.scrollAreaContentLayout.addWidget(self.primaryMouseRow)

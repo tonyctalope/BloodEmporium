@@ -85,13 +85,61 @@ class Config:
         return self.config["path"]
 
     def hotkey(self):
-        return self.config["hotkey"].split(" ")
+        return [key for key in self.config["hotkey"].split(" ") if key != ""]
 
     def interaction(self):
         return self.config["interaction"]
 
     def primary_mouse(self):
         return self.config["primary_mouse"]
+
+    def node_click_offsets(self):
+        """
+        :return: unlockable (in-game name or unique id, lower case) -> (horizontal %, vertical %) to shift the
+                 click away from the centre of that unlockable's icon
+        """
+        offsets = {}
+        for unlockable, offset in self.config.get("node_click_offsets", {}).items():
+            try:
+                x, y = offset
+                offsets[str(unlockable).strip().lower()] = (float(x), float(y))
+            except (TypeError, ValueError):
+                continue # malformed entry: fall back to clicking the centre rather than refusing to run
+        return offsets
+
+    MAX_NODE_CLICK_OFFSET = 40 # beyond this the click leaves the icon entirely
+
+    @staticmethod
+    def parse_node_click_offsets(text):
+        """
+        Parses the settings page text: one "unlockable, horizontal %, vertical %" entry per line.
+
+        :raise ValueError: with a message meant to be shown to the user
+        """
+        offsets = {}
+        for num, line in enumerate(text.splitlines(), 1):
+            if line.strip() == "":
+                continue
+            fields = [field.strip() for field in line.split(",")]
+            if len(fields) != 3:
+                raise ValueError(f"Node click offset line {num} must be "
+                                 f"\"unlockable, horizontal %, vertical %\".")
+            unlockable, x, y = fields
+            if unlockable == "":
+                raise ValueError(f"Node click offset line {num} is missing an unlockable name or id.")
+            try:
+                x, y = float(x), float(y)
+            except ValueError:
+                raise ValueError(f"Node click offset line {num} must end in two numeric percentages.")
+            if max(abs(x), abs(y)) > Config.MAX_NODE_CLICK_OFFSET:
+                raise ValueError(f"Node click offset line {num} must stay within "
+                                 f"±{Config.MAX_NODE_CLICK_OFFSET}% of the icon.")
+            offsets[unlockable.lower()] = (x, y)
+        return offsets
+
+    @staticmethod
+    def format_node_click_offsets(offsets):
+        return "\n".join(f"{unlockable}, {x:g}, {y:g}" for unlockable, (x, y) in offsets.items())
 
     def size(self):
         return self.config["width"], self.config["height"]
@@ -134,9 +182,12 @@ class Config:
             with open("config.json", "w") as output:
                 json.dump({
                     "path": self.config.get("path", default_config["path"]),
-                    "hotkey": self.config.get("hotkey", default_config["hotkey"]),
+                    # an empty hotkey matches nothing at all, so fall back rather than lock the user out
+                    "hotkey": self.config.get("hotkey", "").strip() or default_config["hotkey"],
                     "interaction": self.config.get("interaction", default_config["interaction"]),
                     "primary_mouse": self.config.get("primary_mouse", default_config["primary_mouse"]),
+                    "node_click_offsets": self.config.get("node_click_offsets",
+                                                          default_config["node_click_offsets"]),
                     "width": self.config.get("width", default_config["width"]),
                     "height": self.config.get("height", default_config["height"]),
                     "x": self.config.get("x", default_config["x"]),
@@ -175,6 +226,11 @@ class Config:
 
     def set_primary_mouse(self, primary_mouse):
         self.config["primary_mouse"] = primary_mouse
+        self.commit_changes()
+
+    def set_node_click_offsets(self, node_click_offsets):
+        self.config["node_click_offsets"] = {unlockable: list(offset)
+                                             for unlockable, offset in node_click_offsets.items()}
         self.commit_changes()
 
     def set_size(self, width, height):
