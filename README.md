@@ -59,24 +59,41 @@ A [video guide](https://www.youtube.com/watch?v=3GFwQaB06Ug) is available for a 
 - You can import and export profiles as `.emp` files to share with others.
 
 ### Node Click Offset
-Some unlockables have a misaligned hitbox in game, and a click on the centre of their icon does nothing
-(see [this bug report](https://bugreport.deadbydaylight.com/projects/pr-5642738318/issues/1913)). `Settings` →
-`Node Click Offset` moves the click away from the centre of the icon, for those unlockables only. One entry
-per line:
+Some bloodweb slots have a misaligned hitbox in game, and a click on the centre of the icon sitting in them
+does nothing (see [this bug report](https://bugreport.deadbydaylight.com/projects/pr-5642738318/issues/1913)).
+`Settings` → `Node Click Offset` moves the click away from the centre of the icon, for those slots only.
+
+A slot is identified by **where it sits**, not by what is in it - the unlockable in a given slot changes every
+bloodweb. One entry per line:
 
 ```
-unlockable, horizontal %, vertical %
+angle, ring, horizontal %, vertical %
 ```
 
-where the unlockable is its in-game name or its id as it appears in `config.json`, and the percentages are
-relative to the size of the icon on screen - so the same entry works at any resolution. Negative is left / up,
-and the maximum is 40% (beyond that the click leaves the icon). For example:
+- **angle** - degrees clockwise from straight up: `0` is up, `90` is right, `-90` is left.
+- **ring** - distance from the middle of the bloodweb, where `1` is the innermost ring of six nodes and `2` is
+  twice that far out.
+- **horizontal % / vertical %** - how far to shift the click from the centre of the icon, as a percentage of
+  the icon's size on screen. Negative is left / up, maximum 40 (beyond that the click leaves the icon).
+
+Both angle and ring are ratios, so an entry holds at any resolution. For example:
 
 ```
-Iridescent Head, 0, -25
+15, 2.1, 0, -25
 ```
 
-clicks a quarter of the way above the centre of Iridescent Head, and leaves every other unlockable alone.
+clicks a quarter of the icon's height above centre on the slot just right of straight up on the second ring,
+and leaves every other node alone. A slot is matched within 12° and 0.35 rings, which is comfortably inside
+the 30° spacing between neighbouring slots.
+
+To find the numbers for a slot, run the app and look in `logs/`: every level logs each node's angle and ring,
+
+```
+node slots (angle/ring): 0/1.00  60/1.00  120/1.00  180/1.00  -120/1.00  -60/1.00  15/2.11  -15/2.11  75/2.11
+```
+
+If one specific unlockable ever needs its own offset regardless of where it lands, `node_click_offsets` in
+`config.json` maps an unlockable's in-game name or id to `[horizontal %, vertical %]` and takes precedence.
 
 ## Notes
 - Shaders, game filters, and colourblind modes must be disabled while using this program,

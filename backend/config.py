@@ -93,10 +93,32 @@ class Config:
     def primary_mouse(self):
         return self.config["primary_mouse"]
 
+    def node_click_slots(self):
+        """
+        :return: list of (angle, ring, (horizontal %, vertical %))
+
+        Some bloodweb slots have an in-game hitbox that does not cover the centre of the icon sitting in them
+        (bugreport.deadbydaylight.com/projects/pr-5642738318/issues/1913). Which slot misbehaves has nothing to
+        do with which unlockable happens to land there - that changes every bloodweb - so a slot is named by
+        where it sits: its angle in degrees clockwise from straight up, and its distance from the centre of the
+        bloodweb in multiples of the innermost ring's radius. Both are independent of screen resolution.
+        """
+        slots = []
+        for entry in self.config.get("node_click_slots", []):
+            try:
+                angle, ring, x, y = entry
+                slots.append((float(angle), float(ring), (float(x), float(y))))
+            except (TypeError, ValueError):
+                continue # malformed entry: click the centre rather than refuse to run
+        return slots
+
     def node_click_offsets(self):
         """
-        :return: unlockable (in-game name or unique id, lower case) -> (horizontal %, vertical %) to shift the
-                 click away from the centre of that unlockable's icon
+        :return: unlockable (in-game name or unique id, lower case) -> (horizontal %, vertical %), taking
+                 precedence over node_click_slots for that unlockable
+
+        Not surfaced in the app, since the hitbox problem is per slot rather than per unlockable. Kept for
+        hand-editing config.json if one particular unlockable ever needs its own treatment.
         """
         offsets = {}
         for unlockable, offset in self.config.get("node_click_offsets", {}).items():
@@ -108,6 +130,43 @@ class Config:
         return offsets
 
     MAX_NODE_CLICK_OFFSET = 40 # beyond this the click leaves the icon entirely
+
+    @staticmethod
+    def parse_node_click_slots(text):
+        """
+        Parses the settings page text: one "angle, ring, horizontal %, vertical %" entry per line.
+
+        :raise ValueError: with a message meant to be shown to the user
+        """
+        slots = []
+        for num, line in enumerate(text.splitlines(), 1):
+            if line.strip() == "":
+                continue
+            fields = [field.strip() for field in line.split(",")]
+            if len(fields) != 4:
+                raise ValueError(f"Node click offset line {num} must be "
+                                 f"\"angle, ring, horizontal %, vertical %\".")
+            try:
+                angle, ring, x, y = [float(field) for field in fields]
+            except ValueError:
+                raise ValueError(f"Node click offset line {num} must be four numbers.")
+            if not -360 <= angle <= 360:
+                raise ValueError(f"Node click offset line {num}: angle must be between -360 and 360.")
+            if ring <= 0:
+                raise ValueError(f"Node click offset line {num}: ring must be greater than 0.")
+            if max(abs(x), abs(y)) > Config.MAX_NODE_CLICK_OFFSET:
+                raise ValueError(f"Node click offset line {num} must stay within "
+                                 f"±{Config.MAX_NODE_CLICK_OFFSET}% of the icon.")
+            slots.append((angle, ring, (x, y)))
+        return slots
+
+    @staticmethod
+    def format_node_click_slots(slots):
+        return "\n".join(f"{angle:g}, {ring:g}, {x:g}, {y:g}" for angle, ring, (x, y) in slots)
+
+    def set_node_click_slots(self, slots):
+        self.config["node_click_slots"] = [[angle, ring, x, y] for angle, ring, (x, y) in slots]
+        self.commit_changes()
 
     @staticmethod
     def parse_node_click_offsets(text):
@@ -186,6 +245,8 @@ class Config:
                     "hotkey": self.config.get("hotkey", "").strip() or default_config["hotkey"],
                     "interaction": self.config.get("interaction", default_config["interaction"]),
                     "primary_mouse": self.config.get("primary_mouse", default_config["primary_mouse"]),
+                    "node_click_slots": self.config.get("node_click_slots",
+                                                        default_config["node_click_slots"]),
                     "node_click_offsets": self.config.get("node_click_offsets",
                                                           default_config["node_click_offsets"]),
                     "width": self.config.get("width", default_config["width"]),

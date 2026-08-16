@@ -58,7 +58,7 @@ class SettingsPage(QWidget):
             return
 
         try:
-            node_click_offsets = Config.parse_node_click_offsets(self.nodeClickOffsetText.toPlainText())
+            node_click_slots = Config.parse_node_click_slots(self.nodeClickOffsetText.toPlainText())
         except ValueError as e:
             self.show_settings_page_save_fail_text(f"{e} Changes not saved.")
             return
@@ -68,7 +68,7 @@ class SettingsPage(QWidget):
         config.set_hotkey(hotkey)
         config.set_interaction(self.interactionSelector.currentText())
         config.set_primary_mouse(self.primaryMouseSelector.currentText())
-        config.set_node_click_offsets(node_click_offsets)
+        config.set_node_click_slots(node_click_slots)
         self.config_cache = Config()
         self.refresh_hotkey_keys()
         self.bloodweb_page.refresh_run_description()
@@ -79,7 +79,7 @@ class SettingsPage(QWidget):
         self.hotkeyInput.set_keys(self.config_cache.hotkey())
         self.interactionSelector.setCurrentIndex(self.interactionSelector.findText(self.config_cache.interaction()))
         self.primaryMouseSelector.setCurrentIndex(self.primaryMouseSelector.findText(self.config_cache.primary_mouse()))
-        self.nodeClickOffsetText.setPlainText(Config.format_node_click_offsets(self.config_cache.node_click_offsets()))
+        self.nodeClickOffsetText.setPlainText(Config.format_node_click_slots(self.config_cache.node_click_slots()))
         self.refresh_hotkey_keys()
         self.show_settings_page_save_success_text("Settings reverted to last saved state.")
 
@@ -182,21 +182,27 @@ class SettingsPage(QWidget):
         self.nodeClickOffsetLabel = TextLabel(self, "settingsPageNodeClickOffsetLabel", "Node Click Offset", Font(12))
         self.nodeClickOffsetDescription = TextLabel(self, "settingsPageNodeClickOffsetDescription",
                                                     "<p style=line-height:125%>"
-                                                    "Some unlockables have a misaligned hitbox in game and ignore a "
-                                                    "click on the centre of their icon "
+                                                    "Some bloodweb slots have a misaligned hitbox in game and ignore "
+                                                    "a click on the centre of the icon sitting in them "
                                                     "(bugreport.deadbydaylight.com/projects/pr-5642738318/issues/1913)."
-                                                    "<br>One entry per line: "
-                                                    "<i>unlockable, horizontal %, vertical %</i>, where the "
-                                                    "percentages shift the click away from the centre of the icon "
-                                                    "(negative is left / up, maximum 40).<br>The unlockable is its "
-                                                    "in-game name or its id as it appears in config.json, e.g. "
-                                                    "<i>Iridescent Head, 0, -25</i> to click a quarter of the way "
-                                                    "above the centre.</p>", Font(10))
+                                                    "<br>A slot is identified by where it sits, not by what is in it, "
+                                                    "since that changes every bloodweb. One entry per line:<br>"
+                                                    "<i>angle, ring, horizontal %, vertical %</i><br>"
+                                                    "<b>angle</b>: degrees clockwise from straight up (0 is up, 90 is "
+                                                    "right, -90 is left). <b>ring</b>: distance from the middle of the "
+                                                    "bloodweb, where 1 is the innermost ring of six nodes and 2 is "
+                                                    "twice that far out.<br>The percentages shift the click away from "
+                                                    "the centre of the icon; negative is left / up, maximum 40. So "
+                                                    "<i>15, 2.1, 0, -25</i> clicks a quarter of the icon's height "
+                                                    "above centre, on the slot just right of straight up on the second "
+                                                    "ring.<br>Every node's angle and ring is written to the log each "
+                                                    "level, so the numbers for a slot can be read from there.</p>",
+                                                    Font(10))
         self.nodeClickOffsetDescription.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.nodeClickOffsetText = MultiLineTextInputBox(self, "settingsPageNodeClickOffsetText", 550, 60, 120,
-                                                         "unlockable, horizontal %, vertical %",
-                                                         Config.format_node_click_offsets(
-                                                             self.config_cache.node_click_offsets()))
+                                                         "angle, ring, horizontal %, vertical %",
+                                                         Config.format_node_click_slots(
+                                                             self.config_cache.node_click_slots()))
 
         self.accessibilityLabel = TextLabel(self, "settingsPageAccessibilityLabel", "Accessibility Options", Font(12))
 

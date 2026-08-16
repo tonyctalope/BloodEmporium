@@ -1,4 +1,5 @@
 import logging
+import math
 import os
 import sys
 import time
@@ -114,7 +115,10 @@ class StateProcess(Process):
         Process.__init__(self)
         self.pipe = pipe
         self.args = args
+        self.node_click_slots = []
         self.node_click_offsets = {}
+        self.bloodweb_centre = None
+        self.bloodweb_ring = None
 
     def wait(self, grab_time: float, num_nodes_claimed: int, slow: bool):
         time_since_grab = time.time() - grab_time
@@ -150,12 +154,73 @@ class StateProcess(Process):
             self.node_click_offsets[unique_id] = offset
             print(f"node click offset: {unique_id} at {offset[0]:g}%, {offset[1]:g}% from its centre")
 
+    # a slot has to be identified loosely: node detection jitters by a few pixels, and the user reads these
+    # numbers off a screenshot. Neighbouring slots on the same ring sit at least 30 degrees apart, so 12
+    # degrees cannot reach the wrong one.
+    ANGLE_TOLERANCE = 12
+    RING_TOLERANCE = 0.35
+
+    def measure_bloodweb(self, matched_nodes):
+        """
+        Locates the centre of the bloodweb and the radius of its innermost ring, which together turn a node's
+        pixel position into a (angle, ring) slot that holds at any resolution.
+        """
+        self.bloodweb_centre = None
+        self.bloodweb_ring = None
+
+        origins = [node for node in matched_nodes if node.cls_name in NodeType.MULTI_ORIGIN]
+        others = [node for node in matched_nodes if node.cls_name not in NodeType.MULTI_ORIGIN]
+        if len(origins) != 1 or len(others) == 0:
+            if len(self.node_click_slots) > 0:
+                print("node click offset: no single origin node, clicking node centres this level")
+            return
+
+        centre = origins[0].box.centre()
+        radii = sorted(centre.distance_pos(node.box.centre()) for node in others)
+        # average the innermost ring rather than trust the detected box of a single node
+        inner = [radius for radius in radii if radius <= radii[0] * 1.35]
+        self.bloodweb_centre = centre
+        self.bloodweb_ring = sum(inner) / len(inner)
+
+        # printed every level so the numbers to put in the setting can be read straight out of the log
+        slots = []
+        for node in others:
+            angle, ring = self.node_slot(*node.box.centre().xy())
+            slots.append(f"{angle:.0f}/{ring:.2f}")
+        print(f"node slots (angle/ring): {'  '.join(slots)}")
+
+    def node_slot(self, x, y):
+        """
+        Takes coordinates rather than a node: the detector's nodes carry a box, the graph's carry a centre.
+
+        :return: (angle in degrees clockwise from straight up, distance in innermost-ring radii)
+        """
+        if self.bloodweb_centre is None or not self.bloodweb_ring:
+            return None
+        dx = x - self.bloodweb_centre.x
+        dy = y - self.bloodweb_centre.y
+        return math.degrees(math.atan2(dx, -dy)), math.hypot(dx, dy) / self.bloodweb_ring
+
+    def slot_offset(self, node):
+        slot = self.node_slot(node.x, node.y)
+        if slot is None:
+            return None
+        angle, ring = slot
+        for target_angle, target_ring, offset in self.node_click_slots:
+            difference = abs((angle - target_angle + 180) % 360 - 180)
+            if difference <= StateProcess.ANGLE_TOLERANCE and \
+                    abs(ring - target_ring) <= StateProcess.RING_TOLERANCE:
+                return offset
+        return None
+
     def node_click_position(self, node):
         """
-        :return: where to click the node - its centre, unless an offset is configured for that unlockable to
-                 work around an in-game hitbox that does not cover the whole icon
+        :return: where to click the node - its centre, unless its slot (or, as an override, the unlockable
+                 sitting in it) is configured to work around a hitbox that does not cover the whole icon
         """
         offset = self.node_click_offsets.get(node.name)
+        if offset is None:
+            offset = self.slot_offset(node)
         if offset is None:
             return node.x, node.y
 
@@ -338,6 +403,10 @@ class StateProcess(Process):
             print(f"initialising ({State.version})")
             print(f"merging")
             unlockables = {u.unique_id: u for u in Data.get_unlockables()}
+            self.node_click_slots = config.node_click_slots()
+            for angle, ring, offset in self.node_click_slots:
+                print(f"node click offset: slot at {angle:g} deg, ring {ring:g} "
+                      f"-> {offset[0]:g}%, {offset[1]:g}% from its centre")
             self.resolve_node_click_offsets(config.node_click_offsets(), unlockables)
             are_custom_icons = [is_custom_icon for u in unlockables.values() for is_custom_icon in u.are_custom_icons]
             num_custom = len([is_custom_icon for is_custom_icon in are_custom_icons if is_custom_icon])
@@ -399,6 +468,8 @@ class StateProcess(Process):
                 #     initial_bp_balance = current_bp_balance
                 # self.bp_total = initial_bp_balance - current_bp_balance
                 # self.emit("bloodpoint", (self.bp_total, self.bp_limit))
+
+                self.measure_bloodweb(matched_nodes)
 
                 prestige = [node for node in matched_nodes if node.cls_name == NodeType.PRESTIGE]
                 origin_auto_enabled = [node for node in matched_nodes
