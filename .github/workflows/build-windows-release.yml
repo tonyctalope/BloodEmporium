@@ -11,9 +11,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Version for this release, e.g. 1.2.21-fork.1
+        description: Version for this release, e.g. 1.2.21-fork.2
         required: true
-        default: 1.2.21-fork.1
+        default: 1.2.21-fork.2
       upstream_version:
         description: Upstream release to harvest the native dependencies from
         required: true
@@ -101,22 +101,54 @@ jobs:
           venv\Scripts\python.exe -m PyInstaller --noconfirm --distpath dist onedir.spec
           if (-not (Test-Path 'dist\Blood Emporium\Blood Emporium.exe')) { throw 'the executable was not produced' }
           New-Item -ItemType Directory -Force -Path 'dist\Blood Emporium\logs', 'dist\Blood Emporium\exports' | Out-Null
-          "{0:N0} bytes on disk" -f (Get-ChildItem 'dist\Blood Emporium' -Recurse | Measure-Object -Property Length -Sum).Sum
 
-      # informational: a headless runner is a poor place to judge a GUI app, but a bundle that cannot even
-      # import its dependencies dies immediately, and that is worth knowing before the release is published
+      - name: Collect the delvewheel vendored DLLs PyInstaller 5.3 misses
+        run: |
+          # wheels built with delvewheel put the DLLs their extensions link against in a sibling
+          # <package>.libs directory under hash-suffixed names. PyInstaller 5.3 predates that convention and
+          # collects the .pyd files without them, so the build works on this runner - which has unmangled
+          # system copies - and dies with "DLL load failed" on a user's machine. matplotlib and scipy both
+          # ship this way.
+          $dest = 'dist\Blood Emporium'
+          $found = Get-ChildItem 'venv\Lib\site-packages' -Directory -Filter '*.libs'
+          if (-not $found) { Write-Host 'no .libs directories found' }
+          foreach ($dir in $found) {
+              $dlls = Get-ChildItem $dir.FullName -Filter '*.dll'
+              Write-Host "$($dir.Name): $($dlls.Count) dll(s)"
+              # keep the directory, in case delvewheel's os.add_dll_directory patch is frozen in
+              Copy-Item $dir.FullName -Destination $dest -Recurse -Force
+              # and put them next to the executable, which is on the default DLL search path
+              Copy-Item "$($dir.FullName)\*.dll" -Destination $dest -Force
+          }
+          "{0:N0} bytes on disk" -f (Get-ChildItem $dest -Recurse | Measure-Object -Property Length -Sum).Sum
+
+      - name: Check every imported DLL is in the bundle
+        run: python packaging\check_bundle_dlls.py "dist\Blood Emporium"
+
       - name: Smoke test the frozen build
-        continue-on-error: true
         run: |
           $p = Start-Process -FilePath (Resolve-Path 'dist\Blood Emporium\Blood Emporium.exe') `
                -WorkingDirectory 'dist\Blood Emporium' -PassThru
           Start-Sleep -Seconds 90
+          $p.Refresh()
+
           if ($p.HasExited) {
               Get-ChildItem 'dist\Blood Emporium\logs' -Filter '*.log' -ErrorAction SilentlyContinue |
                   ForEach-Object { Write-Host "--- $($_.Name) ---"; Get-Content $_.FullName }
               throw "the frozen app exited on its own with code $($p.ExitCode)"
           }
-          Write-Host 'still running after 90s, treating the bundle as sound'
+
+          # "still running" is NOT enough: when a bundled import fails, PyInstaller shows a modal
+          # "Unhandled exception in script" dialog and the process stays alive behind it forever
+          $title = $p.MainWindowTitle
+          Write-Host "main window title: '$title'"
+          if ($title -match 'Unhandled exception|Failed to execute script|Fatal error') {
+              Stop-Process -Id $p.Id -Force
+              throw "the frozen app is showing an error dialog: $title"
+          }
+          if ($title -ne 'Blood Emporium') {
+              Write-Host "::warning::expected the window to be titled 'Blood Emporium', got '$title'"
+          }
           Stop-Process -Id $p.Id -Force
 
       - name: Package the portable zip
