@@ -1,0 +1,188 @@
+name: Build Windows release
+
+# The upstream build is not reproducible from the repository alone: yolov5_obb/, tesseract/ and references/
+# are all gitignored, yet onedir.spec needs all three and backend/edge_detection.py imports yolov5_obb at
+# runtime. yolov5_obb also ships a C++ extension (nms_rotated_ext) that would otherwise have to be compiled
+# against torch 1.13 with MSVC. Rather than rebuild all of that, this workflow installs the official upstream
+# release silently and harvests those directories from it - the compiled extension included - so only the
+# Python code, which is what this fork actually changes, is rebuilt.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version for this release, e.g. 1.2.21-fork.1
+        required: true
+        default: 1.2.21-fork.1
+      upstream_version:
+        description: Upstream release to harvest the native dependencies from
+        required: true
+        default: 1.2.21
+      python_version:
+        description: Must match the ABI of the harvested nms_rotated_ext .pyd
+        required: true
+        default: '3.8'
+      prerelease:
+        description: Mark the release as a prerelease
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ inputs.version }}
+      UPSTREAM: ${{ inputs.upstream_version }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python_version }}
+
+      - name: Download the upstream installer
+        run: |
+          $url = "https://github.com/IIInitiationnn/BloodEmporium/releases/download/v$env:UPSTREAM/BloodEmporiumInstaller-$env:UPSTREAM.exe"
+          Write-Host "downloading $url"
+          $ProgressPreference = 'SilentlyContinue'
+          Invoke-WebRequest -Uri $url -OutFile upstream-installer.exe
+          "{0:N0} bytes" -f (Get-Item upstream-installer.exe).Length
+
+      - name: Harvest the native dependencies from it
+        run: |
+          # Inno Setup silent install; the upstream script sets PrivilegesRequired=lowest so no elevation
+          $p = Start-Process -FilePath .\upstream-installer.exe -Wait -PassThru `
+               -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/NOICONS','/DIR=C:\upstream'
+          if ($p.ExitCode -ne 0) { throw "upstream installer exited with $($p.ExitCode)" }
+
+          Get-ChildItem C:\upstream | Select-Object -ExpandProperty Name
+
+          foreach ($dir in 'yolov5_obb', 'tesseract') {
+              if (-not (Test-Path "C:\upstream\$dir")) { throw "C:\upstream\$dir is missing from the upstream build" }
+              Copy-Item "C:\upstream\$dir" -Destination $dir -Recurse -Force
+          }
+
+          # onedir.spec also bundles yolov5_obb/Arial.ttf; fall back to the system font if it is not shipped
+          if (-not (Test-Path 'yolov5_obb\Arial.ttf')) {
+              Copy-Item 'C:\Windows\Fonts\arial.ttf' 'yolov5_obb\Arial.ttf'
+              Write-Host 'Arial.ttf taken from the system fonts'
+          }
+
+      - name: Check the compiled extension matches this Python
+        run: |
+          $pyd = Get-ChildItem -Path yolov5_obb -Recurse -Filter 'nms_rotated_ext*.pyd' | Select-Object -First 1
+          if (-not $pyd) { throw 'nms_rotated_ext .pyd not found in the harvested yolov5_obb' }
+          Write-Host "harvested $($pyd.Name)"
+
+          $tag = 'cp' + '${{ inputs.python_version }}'.Replace('.', '')
+          if ($pyd.Name -ne 'nms_rotated_ext.pyd' -and $pyd.Name -notmatch [regex]::Escape($tag)) {
+              throw "$($pyd.Name) does not match $tag - re-run this workflow with the python_version its name indicates"
+          }
+
+      - name: Create the venv onedir.spec expects
+        run: |
+          # the spec bundles venv/Lib/site-packages/ultralytics by path, so the venv has to live right here
+          python -m venv venv
+          venv\Scripts\python.exe -m pip install --upgrade pip wheel
+          venv\Scripts\python.exe -m pip install -r requirements.txt
+          # imported by backend/node_detection.py but missing from requirements.txt; Pillow produces the icon
+          venv\Scripts\python.exe -m pip install pytesseract Pillow
+          venv\Scripts\python.exe -c "import torch, torchvision, ultralytics, PyQt5, cv2, skimage, pytesseract, pynput; print('imports ok, torch', torch.__version__)"
+
+      - name: Produce the icon that references/ would have held
+        run: venv\Scripts\python.exe packaging\make_icon.py
+
+      - name: Build with PyInstaller
+        run: |
+          venv\Scripts\python.exe -m PyInstaller --noconfirm --distpath dist onedir.spec
+          if (-not (Test-Path 'dist\Blood Emporium\Blood Emporium.exe')) { throw 'the executable was not produced' }
+          New-Item -ItemType Directory -Force -Path 'dist\Blood Emporium\logs', 'dist\Blood Emporium\exports' | Out-Null
+          "{0:N0} bytes on disk" -f (Get-ChildItem 'dist\Blood Emporium' -Recurse | Measure-Object -Property Length -Sum).Sum
+
+      # informational: a headless runner is a poor place to judge a GUI app, but a bundle that cannot even
+      # import its dependencies dies immediately, and that is worth knowing before the release is published
+      - name: Smoke test the frozen build
+        continue-on-error: true
+        run: |
+          $p = Start-Process -FilePath (Resolve-Path 'dist\Blood Emporium\Blood Emporium.exe') `
+               -WorkingDirectory 'dist\Blood Emporium' -PassThru
+          Start-Sleep -Seconds 90
+          if ($p.HasExited) {
+              Get-ChildItem 'dist\Blood Emporium\logs' -Filter '*.log' -ErrorAction SilentlyContinue |
+                  ForEach-Object { Write-Host "--- $($_.Name) ---"; Get-Content $_.FullName }
+              throw "the frozen app exited on its own with code $($p.ExitCode)"
+          }
+          Write-Host 'still running after 90s, treating the bundle as sound'
+          Stop-Process -Id $p.Id -Force
+
+      - name: Package the portable zip
+        run: |
+          # 7-Zip rather than Compress-Archive: the bundle is close to a gigabyte
+          7z a -tzip -mx=5 "BloodEmporium-$env:VERSION-portable.zip" ".\dist\Blood Emporium\*" | Select-Object -Last 5
+          if ($LASTEXITCODE -ne 0) { throw "7z exited with $LASTEXITCODE" }
+          "{0:N0} bytes" -f (Get-Item "BloodEmporium-$env:VERSION-portable.zip").Length
+
+      - name: Build the installer
+        run: |
+          $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) {
+              choco install innosetup -y --no-progress
+          }
+          & $iscc "/DMyAppVersion=$env:VERSION" `
+                  "/DSourceDir=$((Resolve-Path 'dist\Blood Emporium').Path)" `
+                  "/DIconFile=$((Resolve-Path 'references\inspo1.ico').Path)" `
+                  "/O$((Get-Location).Path)" `
+                  packaging\installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC exited with $LASTEXITCODE" }
+          "{0:N0} bytes" -f (Get-Item "BloodEmporiumInstaller-$env:VERSION.exe").Length
+
+      - name: Write the release notes
+        run: |
+          $notes = @(
+            "Fork of Blood Emporium $env:UPSTREAM with two changes.",
+            "",
+            "**Rebinding the run/terminate hotkey now works.** The listener could end up running twice, which",
+            "toggled run and then terminate on a single key press; a key whose release was missed blocked the",
+            "hotkey until it was pressed again; key auto-repeat toggled the run repeatedly while the",
+            "combination was held; and saving an empty hotkey wrote one that matched nothing.",
+            "",
+            "**New setting: Node Click Offset.** Moves the click away from the centre of a given unlockable's",
+            "icon, for unlockables whose in-game hitbox does not cover it",
+            "(https://bugreport.deadbydaylight.com/projects/pr-5642738318/issues/1913). One entry per line,",
+            "``unlockable, horizontal %, vertical %``, as a percentage of the icon's size on screen, so the",
+            "same entry holds at any resolution.",
+            "",
+            "Installs alongside an official Blood Emporium rather than replacing it, and keeps its own settings.",
+            "",
+            "Built from $env:GITHUB_SHA. The native dependencies are taken unmodified from the official",
+            "$env:UPSTREAM installer; only the Python code is rebuilt."
+          )
+          Set-Content -Path release-notes.md -Value $notes -Encoding utf8
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ghArgs = @("v$env:VERSION",
+                      "BloodEmporium-$env:VERSION-portable.zip",
+                      "BloodEmporiumInstaller-$env:VERSION.exe",
+                      '--title', "Blood Emporium $env:VERSION (fork)",
+                      '--notes-file', 'release-notes.md',
+                      '--target', $env:GITHUB_SHA)
+          if ('${{ inputs.prerelease }}' -eq 'true') { $ghArgs += '--prerelease' }
+          gh release create @ghArgs
+          if ($LASTEXITCODE -ne 0) { throw "gh release create exited with $LASTEXITCODE" }
+
+      - name: Keep the build if the release step failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blood-emporium-${{ inputs.version }}
+          path: |
+            BloodEmporium-*-portable.zip
+            BloodEmporiumInstaller-*.exe
+          if-no-files-found: warn
