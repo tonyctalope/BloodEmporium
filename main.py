@@ -912,12 +912,21 @@ def selfcheck():
         lines.append(f"screen capture: ok {capture.bgr.shape}")
 
         from backend.node_detection import NodeDetection
-        NodeDetection()
+        node_detection = NodeDetection()
         lines.append("node model: ok")
 
         from backend.edge_detection import EdgeDetection
-        EdgeDetection() # loads the harvested nms_rotated_ext extension against the bundled torch
+        edge_detection = EdgeDetection() # loads the harvested nms_rotated_ext extension against the bundled torch
         lines.append("edge model: ok")
+
+        # end-to-end forward passes on the capture, exactly what a run does first. This is what catches the
+        # site-packages patches being absent: unpatched ultralytics asserts in its verbose Annotator path, and
+        # unpatched torch dies on Upsample.recompute_scale_factor when the old edges model runs forward.
+        node_detection.predict(capture.get_bgr())
+        lines.append("node predict: ok")
+
+        edge_detection.predict(capture.get_bgr())
+        lines.append("edge predict: ok")
 
         ok = True
     except Exception:

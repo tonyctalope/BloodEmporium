@@ -18,7 +18,9 @@ class CVImage:
     def screen_capture():
         timer = Timer("screen_capture")
         screenshot = pyautogui.screenshot()
-        screenshot = np.array(screenshot)[:, :, ::-1]
+        # ascontiguousarray: the [::-1] channel flip yields a negative-stride view, which parts of
+        # cv2/torch/ultralytics reject (e.g. ultralytics' Annotator asserts on it)
+        screenshot = np.ascontiguousarray(np.array(screenshot)[:, :, ::-1])
         cv = CVImage(screenshot)
         timer.update()
         return cv

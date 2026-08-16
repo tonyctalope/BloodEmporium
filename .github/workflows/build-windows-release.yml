@@ -11,9 +11,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Version for this release, e.g. 1.2.21-fork.4
+        description: Version for this release, e.g. 1.2.21-fork.5
         required: true
-        default: 1.2.21-fork.4
+        default: 1.2.21-fork.5
       upstream_version:
         description: Upstream release to harvest the native dependencies from
         required: true
@@ -98,6 +98,13 @@ jobs:
           # use, which a frozen build only reaches on the user's machine. Pin the era-correct version.
           venv\Scripts\python.exe -m pip install pyscreeze==0.1.28
           venv\Scripts\python.exe -c "import torch, torchvision, ultralytics, PyQt5, cv2, skimage, pytesseract, pynput; print('imports ok, torch', torch.__version__)"
+
+      - name: Apply the site-packages patches the app documents
+        run: |
+          # backend/state.py (MODULE PATCHES) documents three hand-edits the upstream author makes to their
+          # venv; without them the first prediction crashes. The script anchors on the pinned versions and
+          # fails if an anchor is missing.
+          venv\Scripts\python.exe packaging\patch_vendored.py venv\Lib\site-packages
 
       - name: Check pyautogui is functional, not silently stubbed
         run: |
