@@ -77,7 +77,7 @@ class FilterOptionsCollapsibleBox(CollapsibleBox):
 
         # rarity
         self.rarityHeading = TextLabel(self.filters, "rarityHeading", "Rarity")
-        self.filtersLayout.addWidget(self.rarityHeading, 2, num_character_columns, 1, 2)
+        self.filtersLayout.addWidget(self.rarityHeading, 2, num_character_columns, 1, 2) # + 0
 
         self.rarityCheckBoxes = {}
         for i, rarity in enumerate(Data.get_rarities(), 3):
@@ -85,15 +85,15 @@ class FilterOptionsCollapsibleBox(CollapsibleBox):
                                             on_click)
             checkbox.setFixedSize(25, 25)
             self.rarityCheckBoxes[rarity] = checkbox
-            self.filtersLayout.addWidget(checkbox, i, num_character_columns, 1, 1)
+            self.filtersLayout.addWidget(checkbox, i, num_character_columns, 1, 1) # + 0
 
             label = TextLabel(self.filters, f"{TextUtil.camel_case(rarity)}RarityFilterLabel",
                               TextUtil.title_case(rarity))
-            self.filtersLayout.addWidget(label, i, num_character_columns + 1, 1, 1)
+            self.filtersLayout.addWidget(label, i, num_character_columns + 1, 1, 1) # + 1
 
         # type
         self.typeHeading = TextLabel(self.filters, "typeHeading", "Type")
-        self.filtersLayout.addWidget(self.typeHeading, 2, num_character_columns + 2, 1, 2)
+        self.filtersLayout.addWidget(self.typeHeading, 2, num_character_columns + 2, 1, 2) # + 2
 
         self.typeCheckBoxes = {}
         for i, unlockable_type in enumerate(Data.get_types(), 3):
@@ -101,11 +101,27 @@ class FilterOptionsCollapsibleBox(CollapsibleBox):
                                             on_click)
             checkbox.setFixedSize(25, 25)
             self.typeCheckBoxes[unlockable_type] = checkbox
-            self.filtersLayout.addWidget(checkbox, i, num_character_columns + 2, 1, 1)
+            self.filtersLayout.addWidget(checkbox, i, num_character_columns + 2, 1, 1) # + 2
 
             label = TextLabel(self.filters, f"{TextUtil.camel_case(unlockable_type)}TypeFilterLabel",
                               TextUtil.title_case(unlockable_type))
-            self.filtersLayout.addWidget(label, i, num_character_columns + 3, 1, 1)
+            self.filtersLayout.addWidget(label, i, num_character_columns + 3, 1, 1) # + 3
+
+        # item type
+        self.itemTypeHeading = TextLabel(self.filters, "itemTypeHeading", "Item Type")
+        self.filtersLayout.addWidget(self.itemTypeHeading, 2, num_character_columns + 4, 1, 2) # + 4
+
+        self.itemTypeCheckBoxes = {}
+        for i, item_type in enumerate(Data.get_item_types(), 3):
+            checkbox = CheckBoxWithFunction(self.filters, f"{TextUtil.camel_case(item_type)}ItemTypeFilterCheckBox",
+                                            on_click)
+            checkbox.setFixedSize(25, 25)
+            self.itemTypeCheckBoxes[item_type] = checkbox
+            self.filtersLayout.addWidget(checkbox, i, num_character_columns + 4, 1, 1) # + 4
+
+            label = TextLabel(self.filters, f"{TextUtil.camel_case(item_type)}ItemTypeFilterLabel",
+                              TextUtil.title_case(item_type))
+            self.filtersLayout.addWidget(label, i, num_character_columns + 5, 1, 1) # + 5
 
         self.filtersLayout.setColumnStretch(999, 1)
         self.filtersLayout.setRowStretch(999, 1)
@@ -120,6 +136,9 @@ class FilterOptionsCollapsibleBox(CollapsibleBox):
 
     def get_type_filters(self):
         return [name for name, checkbox in self.typeCheckBoxes.items() if checkbox.isChecked()]
+
+    def get_item_type_filters(self):
+        return [name for name, checkbox in self.itemTypeCheckBoxes.items() if checkbox.isChecked()]
 
     def on_pressed(self):
         if self.toggleButton.isChecked():
@@ -136,7 +155,7 @@ class FilterOptionsCollapsibleBox(CollapsibleBox):
             self.filters.setMaximumHeight(round(40 * (self.num_per_row + 1.5)))
 
     def clear_filters(self):
-        for checkboxes in self.characterCheckBoxes, self.rarityCheckBoxes, self.typeCheckBoxes:
+        for checkboxes in self.characterCheckBoxes, self.rarityCheckBoxes, self.typeCheckBoxes, self.itemTypeCheckBoxes:
             for checkbox in checkboxes.values():
                 checkbox.setChecked(False)
         self.on_click()
@@ -292,7 +311,8 @@ class PreferencesPage(QWidget):
                                                   self.searchBar.text(),
                                                   self.filtersBox.get_character_filters(),
                                                   self.filtersBox.get_rarity_filters(),
-                                                  self.filtersBox.get_type_filters()):
+                                                  self.filtersBox.get_type_filters(),
+                                                  self.filtersBox.get_item_type_filters()):
                 widget.setVisible(is_visible)
         else:
             # lastSortedBy was changed on this event; we need visible to be ordered to insert widgets correctly
@@ -304,6 +324,7 @@ class PreferencesPage(QWidget):
                                                   self.filtersBox.get_character_filters(),
                                                   self.filtersBox.get_rarity_filters(),
                                                   self.filtersBox.get_type_filters(),
+                                                  self.filtersBox.get_item_type_filters(),
                                                   sort_by):
                 count = self.scrollAreaContentLayout.count()
                 self.scrollAreaContentLayout.insertWidget(count - 1, widget)
