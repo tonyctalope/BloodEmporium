@@ -12,7 +12,7 @@ import torch
 
 from backend.desktop import logical_position, pointer_position, select_monitor, HyprlandDesktop
 from backend.rotated_nms import obb_nms
-from frontend.linux_hotkey import HyprlandHotkey, binding_spec
+from frontend.linux_hotkey import HyprlandHotkey, binding_spec, keysym_name, lua_string
 
 
 class MonitorTests(unittest.TestCase):
@@ -92,6 +92,16 @@ class NMSTests(unittest.TestCase):
 
 
 class HotkeyTests(unittest.TestCase):
+    def test_french_characters_and_punctuation_use_xkb_names(self):
+        for character, name in [("ç", "ccedilla"), ("é", "eacute"), ("è", "egrave"),
+                                ("à", "agrave"), ("+", "plus"), ("&", "ampersand")]:
+            with self.subTest(character=character):
+                self.assertEqual(keysym_name(character), name)
+        self.assertEqual(binding_spec(["ctrl", "alt", "ç"]), ("CTRL + ALT + ccedilla", 12, "ccedilla"))
+
+    def test_lua_strings_keep_unicode_and_escape_quotes(self):
+        self.assertEqual(lua_string('été "test"'), '"été \\"test\\""')
+
     def test_requires_one_regular_key(self):
         self.assertEqual(binding_spec(["ctrl", "alt", "9"]), ("CTRL + ALT + 9", 12, "9"))
         with self.assertRaises(ValueError):

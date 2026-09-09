@@ -81,7 +81,8 @@ class SettingsPage(QWidget):
         config.set_primary_mouse(self.primaryMouseSelector.currentText())
         config.set_node_click_slots(node_click_slots)
         self.config_cache = Config()
-        self.refresh_hotkey_keys()
+        if not self.refresh_hotkey_keys():
+            return
         self.bloodweb_page.refresh_run_description()
         self.show_settings_page_save_success_text("Settings saved.")
 
@@ -93,29 +94,33 @@ class SettingsPage(QWidget):
         self.interactionSelector.setCurrentIndex(self.interactionSelector.findText(self.config_cache.interaction()))
         self.primaryMouseSelector.setCurrentIndex(self.primaryMouseSelector.findText(self.config_cache.primary_mouse()))
         self.nodeClickOffsetText.setPlainText(Config.format_node_click_slots(self.config_cache.node_click_slots()))
-        self.refresh_hotkey_keys()
+        if not self.refresh_hotkey_keys():
+            return
         self.show_settings_page_save_success_text("Settings reverted to last saved state.")
 
     def refresh_hotkey_keys(self):
         """Cached so the listener thread does not re-read config.json on every single key press."""
         self.hotkey_keys = set(self.config_cache.hotkey())
-        if IS_WAYLAND and self.hotkey_listener is not None:
-            self.start_hotkey_listener()
+        if IS_WAYLAND and hasattr(self, "saveSuccessText"):
+            return self.start_hotkey_listener()
+        return True
 
     def start_hotkey_listener(self):
         self.stop_hotkey_listener() # never leave a previous listener running: two listeners toggle run twice
         self.pressed_keys = [] # keys released while stopped were never seen, so start from a clean state
         self.hotkey_triggered = False
-        if IS_WAYLAND:
-            from frontend.linux_hotkey import HyprlandHotkey
-            self.hotkey_listener = HyprlandHotkey(self.config_cache.hotkey(), self.show_settings_page_save_fail_text)
-        else:
-            self.hotkey_listener = keyboard.Listener(on_press=self.on_key_down, on_release=self.on_key_up)
         try:
+            if IS_WAYLAND:
+                from frontend.linux_hotkey import HyprlandHotkey
+                self.hotkey_listener = HyprlandHotkey(self.config_cache.hotkey(), self.show_settings_page_save_fail_text)
+            else:
+                self.hotkey_listener = keyboard.Listener(on_press=self.on_key_down, on_release=self.on_key_up)
             self.hotkey_listener.start()
+            return True
         except Exception as error:
             self.hotkey_listener = None
             self.show_settings_page_save_fail_text(str(error))
+            return False
 
     def stop_hotkey_listener(self):
         if self.hotkey_listener is None:

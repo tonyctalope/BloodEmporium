@@ -1,5 +1,6 @@
 """Hyprland global shortcut with a Qt-thread callback and local IPC."""
 import json
+import ctypes
 import os
 import shlex
 import sys
@@ -14,6 +15,28 @@ from backend.desktop import hyprctl
 MODIFIERS = {"ctrl": ("CTRL", 4), "alt": ("ALT", 8), "shift": ("SHIFT", 1), "cmd": ("SUPER", 64)}
 
 
+def keysym_name(key):
+    """Translate Qt's printable characters to names accepted by Hyprland/XKB."""
+    if len(key) != 1:
+        return {"enter": "Return", "esc": "Escape", "space": "space"}.get(key, key)
+    xkb = ctypes.CDLL("libxkbcommon.so.0")
+    xkb.xkb_utf32_to_keysym.argtypes = [ctypes.c_uint32]
+    xkb.xkb_utf32_to_keysym.restype = ctypes.c_uint32
+    xkb.xkb_keysym_get_name.argtypes = [ctypes.c_uint32, ctypes.c_char_p, ctypes.c_size_t]
+    xkb.xkb_keysym_get_name.restype = ctypes.c_int
+    symbol = xkb.xkb_utf32_to_keysym(ord(key))
+    name = ctypes.create_string_buffer(64)
+    length = xkb.xkb_keysym_get_name(symbol, name, len(name))
+    if not symbol or not 0 < length < len(name):
+        raise ValueError(f"Unsupported shortcut key: {key!r}")
+    return name.value.decode("ascii")
+
+
+def lua_string(value):
+    # Lua accepts UTF-8, but not JSON's \uXXXX escapes (e.g. in non-ASCII checkout paths).
+    return json.dumps(value, ensure_ascii=False)
+
+
 def binding_spec(keys):
     mods, mask, normal = [], 0, []
     for key in keys:
@@ -22,7 +45,7 @@ def binding_spec(keys):
             mods.append(name)
             mask |= bit
         else:
-            normal.append({"enter": "Return", "esc": "Escape", "space": "space"}.get(key, key))
+            normal.append(keysym_name(key))
     if len(normal) != 1:
         raise ValueError("Use modifiers and exactly one non-modifier key for the Hyprland shortcut.")
     return " + ".join(mods + normal), mask, normal[0]
@@ -82,8 +105,8 @@ class HyprlandHotkey:
                 raise RuntimeError(f"Hyprland shortcut {self.spec} is already assigned. Choose another shortcut.")
             self.registered = True
             return
-        hyprctl("eval", f"hl.bind({json.dumps(self.spec)}, hl.dsp.exec_cmd({json.dumps(self.command)}), "
-                f'{{description={json.dumps(self.description)}}})')
+        hyprctl("eval", f"hl.bind({lua_string(self.spec)}, hl.dsp.exec_cmd({lua_string(self.command)}), "
+                f'{{description={lua_string(self.description)}}})')
         self.registered = True
 
     def poll(self):
@@ -104,5 +127,5 @@ class HyprlandHotkey:
         if self.registered:
             bindings = json.loads(hyprctl("-j", "binds"))
             if any(b.get("description") == self.description for b in bindings):
-                hyprctl("eval", f"hl.unbind({json.dumps(self.spec)})")
+                hyprctl("eval", f"hl.unbind({lua_string(self.spec)})")
             self.registered = False
