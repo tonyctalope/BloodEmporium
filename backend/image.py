@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-import pyautogui
+from backend.desktop import desktop as pyautogui
 
 from backend.util.timer import Timer
 

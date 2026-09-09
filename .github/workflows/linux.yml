@@ -1,0 +1,28 @@
+name: Linux checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install desktop test dependencies
+        run: sudo apt-get update && sudo apt-get install -y python3-venv tesseract-ocr tesseract-ocr-eng xvfb scrot libxcb-xinerama0
+      - name: Set up the Linux environment
+        run: ./setup-linux.sh
+      - name: Regression tests
+        run: .venv/bin/python -m unittest discover -s tests -v
+      - name: Capture and run both recognition models
+        run: xvfb-run -a -s '-screen 0 1920x1080x24' ./run-linux.sh --selfcheck
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-selfcheck
+          path: selfcheck.txt

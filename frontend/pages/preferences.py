@@ -3,9 +3,9 @@ import math
 import os
 import sys
 
-from PIL import Image, ImageQt
+from PIL import Image
 from PyQt5.QtCore import Qt, QSize, QTimer
-from PyQt5.QtGui import QIcon, QPixmap
+from PyQt5.QtGui import QIcon, QPixmap, QImage
 from PyQt5.QtWidgets import QLabel, QWidget, QGridLayout, QVBoxLayout, QToolButton, QInputDialog, QMessageBox, \
     QFileDialog
 
@@ -253,7 +253,9 @@ Type: {TextUtil.title_case(unlockable.type)}""")
                 bg = Image.open(f"{Path.assets_backgrounds}/{self.unlockable.rarity}.png")
                 icon = Image.open(self.unlockable.image_paths[0])
                 combined = Image.alpha_composite(bg, icon)
-                self.image.setPixmap(QPixmap.fromImage(ImageQt.ImageQt(combined)))
+                rgba = combined.convert("RGBA")
+                image = QImage(rgba.tobytes(), rgba.width, rgba.height, QImage.Format_RGBA8888).copy()
+                self.image.setPixmap(QPixmap.fromImage(image))
             except:
                 print(f"error adding background to {self.unlockable.unique_id}")
                 self.image.setPixmap(QPixmap(self.unlockable.image_paths[0]))

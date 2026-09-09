@@ -2,7 +2,7 @@ import atexit
 import os
 import subprocess
 import sys
-from multiprocessing import freeze_support, Pipe
+from multiprocessing import freeze_support, Pipe, set_start_method
 from threading import Thread
 from typing import Tuple
 
@@ -347,7 +347,10 @@ class MainWindow(QMainWindow):
 
             # may as well use the validated thresholds & limits
             self.bloodwebPage.summaryBox.reset()
-            self.state.run((debug, write_to_output, tier, subtier, prestige_limit, bp_limit))
+            try:
+                self.state.run((debug, write_to_output, tier, subtier, prestige_limit, bp_limit))
+            except Exception as error:
+                return self.bloodwebPage.show_run_error(str(error), True)
             self.toggle_run_terminate_text("Running...", False, True)
             self.bloodwebPage.start_time()
         else: # terminate
@@ -901,14 +904,24 @@ def selfcheck():
     import traceback
     lines = []
     try:
+        from backend.desktop import IS_WAYLAND
         import pyscreeze
         # the exact names main.py's State eventually needs; missing ones are stubbed, not import errors
-        for name in ["center", "grab", "pixel", "pixelMatchesColor", "screenshot"]:
+        for name in (["screenshot"] if sys.platform == "linux" else ["center", "grab", "pixel", "pixelMatchesColor", "screenshot"]):
             assert hasattr(pyscreeze, name), f"pyscreeze {pyscreeze.__version__} has no {name}"
         lines.append(f"pyscreeze {pyscreeze.__version__}: ok")
 
         from backend.image import CVImage
-        capture = CVImage.screen_capture() # the first call a run makes, via pyautogui.screenshot()
+        if IS_WAYLAND:
+            from backend.desktop import desktop
+            desktop.begin_run(os.environ.get("BLOODEMPORIUM_MONITOR") or Config().capture_monitor())
+        capture = CVImage.screen_capture() # the first call a run makes
+        import pytesseract
+        lines.append(f"Tesseract {pytesseract.get_tesseract_version()}: ok")
+        from backend.mergedbase import MergedBase
+        merged = MergedBase("survivor")
+        assert merged.images is not None and len(merged.names) > 0
+        lines.append(f"icon templates: ok ({len(merged.names)})")
         lines.append(f"screen capture: ok {capture.bgr.shape}")
 
         from backend.node_detection import NodeDetection
@@ -939,6 +952,8 @@ def selfcheck():
 
 if __name__ == "__main__":
     freeze_support() # --onedir (for exe)
+    if sys.platform == "linux":
+        set_start_method("spawn", force=True) # Qt and torch threads must not be forked
     Config(True) # validate config
     Runtime(True) # validate runtime settings
 
@@ -953,11 +968,28 @@ if __name__ == "__main__":
     main_pipe, state_pipe = Pipe() # emit from state pipe to main pipe. main can receive, state can send
     main_emitter = Emitter(main_pipe)
 
+    if sys.platform == "linux":
+        from PyQt5.QtCore import QLibraryInfo
+        os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = QLibraryInfo.location(QLibraryInfo.PluginsPath)
+    if "--desktop-selfcheck" in sys.argv:
+        import runpy
+        check = runpy.run_path("packaging/check_linux_desktop.py")
+        check["main"](sys.modules[__name__])
+        sys.exit(0)
+
     app = QApplication([])
+    app.setApplicationName("Blood Emporium")
+    app.setDesktopFileName("bloodemporium")
+    command_server = None
+    if sys.platform == "linux":
+        from frontend.linux_hotkey import CommandServer
+        command_server = CommandServer(app)
     splash = QSplashScreen(QPixmap(Icons.app_splash))
     splash.show()
 
     window = MainWindow(state_pipe, main_emitter, len(sys.argv) > 1 and "--dev" in sys.argv)
+    if command_server is not None:
+        command_server.callback = lambda: window.run_terminate() if window.settingsPage.hotkey_listener is not None else None
     splash.finish(window)
     window.show()
 
@@ -980,6 +1012,7 @@ if __name__ == "__main__":
 
     @atexit.register
     def shutdown():
+        window.settingsPage.stop_hotkey_listener()
         window.state.terminate() # terminate running process if main app is closed
 
     sys.exit(app.exec_())

@@ -6,7 +6,9 @@ from PyQt5.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QEasingCurve
 from PyQt5.QtGui import QFont, QIcon, QCursor
 from PyQt5.QtWidgets import QLabel, QLineEdit, QCheckBox, QComboBox, QListView, QPushButton, QWidget, QVBoxLayout, \
     QToolButton, QProxyStyle, QStyle, QScrollArea, QScrollBar, QPlainTextEdit
-from pynput import keyboard
+from backend.desktop import IS_WAYLAND
+if not IS_WAYLAND:
+    from pynput import keyboard
 
 from frontend.stylesheets import StyleSheets
 
@@ -319,6 +321,9 @@ class HotkeyInput(QPushButton, HotkeySuspendingInput):
 
     def start_recording_listener(self):
         self.stop_recording_listener() # never leave a previous listener running
+        if IS_WAYLAND:
+            self.setFocus()
+            return # Qt records keys locally; Hyprland handles the global shortcut.
         self.listener = keyboard.Listener(on_press=self.on_key_down, on_release=self.on_key_up)
         self.listener.start()
 
@@ -347,6 +352,32 @@ class HotkeyInput(QPushButton, HotkeySuspendingInput):
 
         self.setText(" + ".join([TextUtil.title_case(k) for k in self.pressed_keys]))
         self.stop_recording()
+
+    def keyPressEvent(self, event):
+        if IS_WAYLAND and self.active:
+            if event.isAutoRepeat():
+                return
+            names = {Qt.Key_Control: "ctrl", Qt.Key_Alt: "alt", Qt.Key_Shift: "shift",
+                     Qt.Key_Meta: "cmd", Qt.Key_Escape: "esc", Qt.Key_Return: "enter",
+                     Qt.Key_Space: "space"}
+            key = names.get(event.key())
+            if key is None:
+                from PyQt5.QtGui import QKeySequence
+                key = QKeySequence(event.key()).toString().lower()
+            if key and key not in self.pressed_keys:
+                self.pressed_keys.append(key)
+            self.setText(" + ".join(self.pressed_keys))
+            event.accept()
+        else:
+            super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event):
+        if IS_WAYLAND and self.active:
+            if not event.isAutoRepeat():
+                self.stop_recording()
+            event.accept()
+        else:
+            super().keyReleaseEvent(event)
 
     def set_keys(self, pressed_keys):
         self.pressed_keys = list(pressed_keys)

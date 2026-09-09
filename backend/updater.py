@@ -14,6 +14,8 @@ from backend.state import State
 # contributions to auto-update code courtesy of DAzVise#1666
 # https://stackoverflow.com/questions/52127046/how-can-i-pull-private-repo-data-using-github-api
 def get_latest_update():
+    if sys.platform != "win32":
+        return None # Linux installations are updated using git and setup-linux.sh.
     resp = requests.get("https://api.github.com/repos/IIInitiationnn/BloodEmporium/releases/latest")
     if resp.status_code != 200:
         return

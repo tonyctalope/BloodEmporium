@@ -40,6 +40,12 @@ class Config:
         if validate:
             if not os.path.isfile("config.json"):
                 copyfile("assets/default_config.json", "config.json")
+                if os.name == "posix":
+                    with open("config.json") as source:
+                        initial = json.load(source)
+                    initial["path"] = ""
+                    with open("config.json", "w") as target:
+                        json.dump(initial, target, indent=4)
 
             with open("config.json", "r") as f:
                 self.config: Dict[str, Any] = dict(json.load(f))
@@ -83,6 +89,13 @@ class Config:
 
     def path(self):
         return self.config["path"]
+
+    def capture_monitor(self):
+        return self.config.get("capture_monitor", "")
+
+    def set_capture_monitor(self, output):
+        self.config["capture_monitor"] = output
+        self.commit_changes()
 
     def hotkey(self):
         return [key for key in self.config["hotkey"].split(" ") if key != ""]
@@ -241,6 +254,7 @@ class Config:
             with open("config.json", "w") as output:
                 json.dump({
                     "path": self.config.get("path", default_config["path"]),
+                    "capture_monitor": self.config.get("capture_monitor", ""),
                     # an empty hotkey matches nothing at all, so fall back rather than lock the user out
                     "hotkey": self.config.get("hotkey", "").strip() or default_config["hotkey"],
                     "interaction": self.config.get("interaction", default_config["interaction"]),
@@ -271,7 +285,7 @@ class Config:
 
     @staticmethod
     def verify_path(path):
-        return os.path.isdir(path)
+        return path == "" or os.path.isdir(path)
 
     def set_path(self, path):
         self.config["path"] = path

@@ -1,3 +1,5 @@
+import os
+
 import cv2
 import numpy as np
 
@@ -52,7 +54,7 @@ class MergedBase:
 
         for unlockable in unlockables:
             for image_path in unlockable.image_paths:
-                image_name = image_path.split("\\")[-1]
+                image_name = os.path.basename(image_path)
 
                 if "mysteryBox" in image_name:
                     dim = round(Resolution.mystery_box * self.size)

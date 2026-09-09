@@ -32,3 +32,8 @@ investigate/
 references/
 yolov5_obb/
 tesseract/
+.venv/
+.bootstrap/
+.python/
+.cache/
+selfcheck.txt

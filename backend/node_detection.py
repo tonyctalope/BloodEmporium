@@ -20,7 +20,8 @@ from backend.util.timer import Timer
 
 # https://stackoverflow.com/questions/59829470/pyinstaller-and-tesseract-ocr
 # https://stackoverflow.com/questions/66470878/tesseract-ocr-doesnt-work-when-python-script-is-converted-to-exe-without-consol
-pytesseract.pytesseract.tesseract_cmd = os.getcwd() + r"\tesseract\tesseract.exe"
+if os.name == "nt":
+    pytesseract.pytesseract.tesseract_cmd = os.path.join(os.getcwd(), "tesseract", "tesseract.exe")
 
 class NodeDetection:
     NUM_CALIBRATIONS = 25
@@ -37,7 +38,7 @@ class NodeDetection:
         self.ratios: List[float] = []
 
     def predict(self, img_original) -> Results:
-        return self.model.predict(img_original)[0]
+        return self.model.predict(img_original, device="cpu", verbose=False)[0]
 
     def preprocess_unlockable(self, xyxy, screenshot, size):
         x1, y1, x2, y2 = xyxy

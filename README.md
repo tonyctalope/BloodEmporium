@@ -22,7 +22,54 @@ A [video guide](https://www.youtube.com/watch?v=3GFwQaB06Ug) is available for a 
 - Should not be bannable since there are no interactions with the game's memory or process, and the entire procedure
   occurs outside game matches. There have been no verified reported bans as of yet.
 
-## Installation
+## Arch Linux / Omarchy
+
+This fork runs natively on Linux. Hyprland **0.55 or later** is supported through its Lua API;
+X11 uses PyAutoGUI. Other Wayland compositors are not supported yet.
+The existing Windows packaging remains available.
+
+1. Install prerequisites on Arch: `sudo pacman -S --needed python git tesseract tesseract-data-eng grim`.
+   On Omarchy, you can use `omarchy pkg add python git tesseract tesseract-data-eng grim`.
+2. Clone this fork, then run `./setup-linux.sh`. It installs its own Python 3.10 and CPU inference
+   dependencies inside the checkout; it does not change the system Python or require CUDA.
+   Optional application-menu shortcut: `python packaging/install_linux_launcher.py`.
+3. Run `./run-linux.sh --selfcheck` to verify screen capture and both recognition models.
+4. Launch `./run-linux.sh`. In **Settings → Game screen**, choose the monitor displaying the game
+   (or leave it on the screen focused when starting). Leave the icon folder empty for bundled icons.
+5. Open the Bloodweb in the game, keep the game visible and focused, then press **Ctrl + Alt + 9**
+   to start or stop. Use fullscreen or borderless fullscreen on the selected monitor.
+
+The shortcut is registered with Hyprland while the app is open, is suspended while editing fields,
+and is removed on normal exit. Existing compositor shortcuts are not overwritten. Configuration
+reloads are detected and the shortcut is restored. Rebind the shortcut in Settings if it conflicts.
+You can also stop/start using `.venv/bin/python backend/control.py toggle` while the app is open.
+
+For a fixed output from a script: `BLOODEMPORIUM_MONITOR=DP-1 ./run-linux.sh` (overrides Settings).
+Capture pixels are mapped to the monitor's logical coordinates, including its position and scale.
+Do not move the game to another monitor during a run. Keep filters and colour adjustments disabled.
+
+Settings, profiles and logs stay in this checkout (`config.json`, `runtime.json`, `logs/`).
+To update, close the app, run `git pull --ff-only`, then `./setup-linux.sh` again. The Windows
+installer auto-updater is disabled on Linux.
+
+Linux inference uses the original models and a pinned [YOLOv5-OBB source checkout](https://github.com/hukaixuan19970627/yolov5_obb/tree/b00c3f245e50e7a80460a1b949d22ea7dfeb27a0),
+with OpenCV rotated NMS replacing the Windows/CUDA extension. Hyprland input uses its
+[official dispatchers](https://wiki.hypr.land/Configuring/Basics/Dispatchers/).
+
+Validation commands:
+
+```bash
+.venv/bin/python -m unittest discover -s tests -v
+./run-linux.sh --selfcheck
+./run-linux.sh --desktop-selfcheck
+```
+
+The last command opens temporary windows, verifies the GUI, shortcut recording, local command delivery,
+and presses/releases a button in its own test window. It does not start Bloodweb automation.
+A successful self-check verifies the application, not whether Dead by Daylight itself runs through
+Proton or whether recognition is accurate on a particular in-game Bloodweb.
+
+## Windows installation
 1. Download the latest release [here](https://github.com/IIInitiationnn/BloodEmporium/releases/latest) - make sure you
    download `BloodEmporiumInstaller-version.exe` and not the source code. Install.
 2. Run `Blood Emporium.exe` and check the `Settings` section to make sure the app is ready to run. For more information,

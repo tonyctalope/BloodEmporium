@@ -3,7 +3,9 @@ import sys
 
 from PyQt5.QtCore import QSize, QTimer, Qt, pyqtSignal
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QFileDialog, QGridLayout
-from pynput import keyboard
+from backend.desktop import IS_WAYLAND
+if not IS_WAYLAND:
+    from pynput import keyboard
 
 from frontend.generic import Font, TextLabel, TextInputBox, Button, HotkeyInput, ScrollAreaContent, ScrollBar, \
     ScrollArea, Selector, MultiLineTextInputBox, HotkeyListenerControl
@@ -52,6 +54,13 @@ class SettingsPage(QWidget):
             return
 
         hotkey = self.hotkeyInput.pressed_keys
+        if IS_WAYLAND:
+            from frontend.linux_hotkey import binding_spec
+            try:
+                binding_spec(hotkey)
+            except ValueError as e:
+                self.show_settings_page_save_fail_text(str(e))
+                return
         if len(hotkey) == 0:
             self.show_settings_page_save_fail_text("Click the hotkey field and press the key combination you want "
                                                    "before saving. Changes not saved.")
@@ -65,6 +74,8 @@ class SettingsPage(QWidget):
 
         config = Config()
         config.set_path(path)
+        if IS_WAYLAND:
+            config.set_capture_monitor(self.monitorSelector.currentData() or "")
         config.set_hotkey(hotkey)
         config.set_interaction(self.interactionSelector.currentText())
         config.set_primary_mouse(self.primaryMouseSelector.currentText())
@@ -76,6 +87,8 @@ class SettingsPage(QWidget):
 
     def revert_settings(self):
         self.pathText.setText(self.config_cache.path())
+        if IS_WAYLAND:
+            self.monitorSelector.setCurrentIndex(max(0, self.monitorSelector.findData(self.config_cache.capture_monitor())))
         self.hotkeyInput.set_keys(self.config_cache.hotkey())
         self.interactionSelector.setCurrentIndex(self.interactionSelector.findText(self.config_cache.interaction()))
         self.primaryMouseSelector.setCurrentIndex(self.primaryMouseSelector.findText(self.config_cache.primary_mouse()))
@@ -86,13 +99,23 @@ class SettingsPage(QWidget):
     def refresh_hotkey_keys(self):
         """Cached so the listener thread does not re-read config.json on every single key press."""
         self.hotkey_keys = set(self.config_cache.hotkey())
+        if IS_WAYLAND and self.hotkey_listener is not None:
+            self.start_hotkey_listener()
 
     def start_hotkey_listener(self):
         self.stop_hotkey_listener() # never leave a previous listener running: two listeners toggle run twice
         self.pressed_keys = [] # keys released while stopped were never seen, so start from a clean state
         self.hotkey_triggered = False
-        self.hotkey_listener = keyboard.Listener(on_press=self.on_key_down, on_release=self.on_key_up)
-        self.hotkey_listener.start()
+        if IS_WAYLAND:
+            from frontend.linux_hotkey import HyprlandHotkey
+            self.hotkey_listener = HyprlandHotkey(self.config_cache.hotkey(), self.show_settings_page_save_fail_text)
+        else:
+            self.hotkey_listener = keyboard.Listener(on_press=self.on_key_down, on_release=self.on_key_up)
+        try:
+            self.hotkey_listener.start()
+        except Exception as error:
+            self.hotkey_listener = None
+            self.show_settings_page_save_fail_text(str(error))
 
     def stop_hotkey_listener(self):
         if self.hotkey_listener is None:
@@ -159,6 +182,9 @@ class SettingsPage(QWidget):
                                                "Dead by Daylight/DeadByDaylight/Content/UI/Icons<br>"
                                                "Default path on Epic Games is C:/Program Files/Epic Games/"
                                                "DeadByDaylight/Content/UI/Icons</p>", Font(10))
+        if sys.platform == "linux":
+            self.pathLabelDefaultLabel.setText("Leave empty to use bundled icons. For custom icons, select the "
+                                               "DeadByDaylight/Content/UI/Icons folder in your Steam library.")
         self.pathLabelDefaultLabel.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.pathLabelDefaultLabel.setCursor(Qt.IBeamCursor)
 
@@ -256,6 +282,21 @@ class SettingsPage(QWidget):
         self.scrollAreaContentLayout.addWidget(self.pathLabel)
         self.scrollAreaContentLayout.addWidget(self.pathLabelDefaultLabel)
         self.scrollAreaContentLayout.addWidget(self.pathRow)
+        if IS_WAYLAND:
+            import json
+            from backend.desktop import hyprctl
+            from PyQt5.QtWidgets import QComboBox
+            self.monitorSelector = QComboBox(self)
+            self.monitorSelector.addItem("Focused screen when starting", "")
+            outputs = [m["name"] for m in json.loads(hyprctl("-j", "monitors"))]
+            saved = self.config_cache.capture_monitor()
+            if saved and saved not in outputs:
+                outputs.append(saved)
+            for output in outputs:
+                self.monitorSelector.addItem(output, output)
+            self.monitorSelector.setCurrentIndex(max(0, self.monitorSelector.findData(saved)))
+            self.scrollAreaContentLayout.addWidget(TextLabel(self, "monitorLabel", "Game screen", Font(12)))
+            self.scrollAreaContentLayout.addWidget(self.monitorSelector)
         self.scrollAreaContentLayout.addWidget(self.hotkeyLabel)
         self.scrollAreaContentLayout.addWidget(self.hotkeyDescription)
         self.scrollAreaContentLayout.addWidget(self.hotkeyInput)

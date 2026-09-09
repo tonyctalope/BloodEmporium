@@ -9,7 +9,7 @@ from multiprocessing import Process, Pipe
 from typing import List
 
 # import mouse
-import pyautogui
+from backend.desktop import desktop as pyautogui, IS_WAYLAND
 # import pydirectinput
 from numpy import mean
 # from pynput.mouse import Controller, Button
@@ -115,6 +115,12 @@ class StateProcess(Process):
         Process.__init__(self)
         self.pipe = pipe
         self.args = args
+        self.capture_monitor = None
+        if IS_WAYLAND:
+            import json
+            from backend.desktop import hyprctl, select_monitor
+            requested = os.environ.get("BLOODEMPORIUM_MONITOR") or Config().capture_monitor()
+            self.capture_monitor = select_monitor(json.loads(hyprctl("-j", "monitors")), requested)["name"]
         self.node_click_slots = []
         self.node_click_offsets = {}
         self.bloodweb_centre = None
@@ -373,6 +379,7 @@ class StateProcess(Process):
             log.addHandler(stream_handler)
 
             # >= 100 logs, kill until 99
+            os.makedirs("logs", exist_ok=True)
             all_logs = [f"logs/{x}" for x in os.listdir("logs")]
             if len(all_logs) >= 100:
                 all_logs.sort(key=os.path.getctime, reverse=True)
@@ -392,6 +399,8 @@ class StateProcess(Process):
             # pydirectinput.FAILSAFE = False
             # pydirectinput.PAUSE = 0.05
 
+            if IS_WAYLAND:
+                pyautogui.begin_run(self.capture_monitor)
             node_detector = NodeDetection()
 
             self.prestige_total = 0
@@ -737,7 +746,8 @@ class State:
 
     def terminate(self):
         if self.is_active():
-            pyautogui.mouseUp(button=Config().primary_mouse()) # release if was held
             self.process.terminate()
+            self.process.join(timeout=5)
             self.process = None
+            pyautogui.mouseUp(button=Config().primary_mouse()) # release after worker can no longer press
             print("process terminated")
