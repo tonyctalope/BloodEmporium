@@ -16,7 +16,7 @@ if [[ ! -x .bootstrap/bin/uv ]]; then
     .bootstrap/bin/python -m pip install uv==0.12.11
 fi
 if [[ ! -x .venv/bin/python ]]; then
-    .bootstrap/bin/uv venv --python 3.10 .venv
+    .bootstrap/bin/uv venv --managed-python --python 3.10 .venv
 fi
 .bootstrap/bin/uv pip install --python .venv/bin/python \
     'torch==1.13.1+cpu' 'torchvision==0.14.1+cpu' --index-url https://download.pytorch.org/whl/cpu
