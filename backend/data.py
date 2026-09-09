@@ -10,7 +10,7 @@ class Unlockable:
     def generate_unique_id(unlockable_id, category):
         return f"{unlockable_id}_{category}"
 
-    def __init__(self, unlockable_id, name, category, rarity, notes, unlockable_type, order, image_paths, are_custom_icons):
+    def __init__(self, unlockable_id, name, category, rarity, notes, unlockable_type, item_type, order, image_paths, are_custom_icons):
         self.unique_id = Unlockable.generate_unique_id(unlockable_id, category)
         self.id = unlockable_id
         self.name = name
@@ -18,6 +18,7 @@ class Unlockable:
         self.rarity = rarity
         self.notes = notes
         self.type = unlockable_type
+        self.item_type = item_type
         self.order = order
         self.image_paths = image_paths
         self.are_custom_icons = are_custom_icons
@@ -37,7 +38,7 @@ class Data:
         print(f"error")
 
     __cursor = __connection.cursor()
-    __cursor.execute("SELECT id, alternate_path, name, category, rarity, notes, type, \"order\" FROM unlockables ORDER BY \"order\"")
+    __cursor.execute("SELECT id, alternate_path, name, category, rarity, notes, type, item_type, \"order\" FROM unlockables ORDER BY \"order\"")
     __unlockables_rows = __cursor.fetchall()
 
     __cursor.execute("SELECT id, alias, name FROM killers")
@@ -51,7 +52,7 @@ class Data:
         all_files = [(subdir, file) for subdir, dirs, files in os.walk(Config().path()) for file in files]
         rows = []
         for row in Data.__unlockables_rows:
-            u_id, u_alternate_path, u_name, u_category, u_rarity, u_notes, u_type, u_order = row
+            u_id, u_alternate_path, u_name, u_category, u_rarity, u_notes, u_type, u_item_type, u_order = row
 
             # search in user's folder
             u_image_paths = []
@@ -96,7 +97,7 @@ class Data:
     def get_icons():
         icons = {}
         for row in Data.__get_unlockable_data():
-            u_id, u_alternate_path, u_name, u_category, u_rarity, u_notes, u_type, u_order, u_image_paths, u_are_custom_icons = row
+            u_id, u_alternate_path, u_name, u_category, u_rarity, u_notes, u_type, u_item_type, u_order, u_image_paths, u_are_custom_icons = row
             icons[Unlockable.generate_unique_id(u_id, u_category)] = {
                 "image_paths": u_image_paths,
                 "are_custom_icons": u_are_custom_icons,
@@ -108,8 +109,8 @@ class Data:
     def get_unlockables() -> List[Unlockable]:
         unlockables = []
         for row in Data.__get_unlockable_data():
-            u_id, u_alternate_path, u_name, u_category, u_rarity, u_notes, u_type, u_order, u_image_paths, u_are_custom_icons = row
-            unlockables.append(Unlockable(u_id, u_name, u_category, u_rarity, u_notes, u_type, u_order, u_image_paths, u_are_custom_icons))
+            u_id, u_alternate_path, u_name, u_category, u_rarity, u_notes, u_type, u_item_type, u_order, u_image_paths, u_are_custom_icons = row
+            unlockables.append(Unlockable(u_id, u_name, u_category, u_rarity, u_notes, u_type, u_item_type, u_order, u_image_paths, u_are_custom_icons))
         return unlockables
 
     @staticmethod
@@ -138,6 +139,10 @@ class Data:
         return ["add-on", "item", "offering", "perk", "mystery_box"]
 
     @staticmethod
+    def get_item_types():
+        return ["firecracker", "flashlight", "fog_vial", "key", "map", "medkit", "toolbox"]
+
+    @staticmethod
     def get_rarities():
         return ["common", "uncommon", "rare", "very_rare", "ultra_rare", "event", "varies"]
 
@@ -160,7 +165,7 @@ class Data:
         return ["default", "name", "character", "rarity", "type", "tier"]
 
     @staticmethod
-    def filter(unlockable_widgets, name, categories, rarities, types, sort_by=None):
+    def filter(unlockable_widgets, name, categories, rarities, types, item_types, sort_by=None):
         # category = character
 
         sorted_widgets = unlockable_widgets.copy()
@@ -201,6 +206,10 @@ class Data:
                 continue
 
             if len(types) != 0 and unlockable.type not in types:
+                filtered.append((unlockable_widget, False))
+                continue
+
+            if len(item_types) != 0 and unlockable.item_type not in item_types:
                 filtered.append((unlockable_widget, False))
                 continue
 
