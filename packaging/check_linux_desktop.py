@@ -79,6 +79,13 @@ def main(app_module):
         wait()
         assert clicks == ["down", "up"], clicks
         print(f"Wayland capture {capture.size}, pointer positioning, held click and release: OK")
+        desktop.mouseDown()
+        wait()
+        assert clicks == ["down", "up", "down"], clicks
+        desktop.pointer.close() # Same EOF the helper receives if the automation worker is terminated.
+        wait()
+        assert clicks == ["down", "up", "down", "up"], clicks
+        print("Held button released when worker input closes: OK")
     finally:
         desktop = HyprlandDesktop()
         desktop.mouseUp(_pause=False)

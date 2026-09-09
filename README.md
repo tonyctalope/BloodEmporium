@@ -28,8 +28,8 @@ This fork runs natively on Linux. Hyprland **0.55 or later** is supported throug
 X11 uses PyAutoGUI. Other Wayland compositors are not supported yet.
 The existing Windows packaging remains available.
 
-1. Install prerequisites on Arch: `sudo pacman -S --needed python git tesseract tesseract-data-eng grim`.
-   On Omarchy, you can use `omarchy pkg add python git tesseract tesseract-data-eng grim`.
+1. Install prerequisites on Arch: `sudo pacman -S --needed python git tesseract tesseract-data-eng grim wayland gcc pkgconf`.
+   On Omarchy, you can use `omarchy pkg add python git tesseract tesseract-data-eng grim wayland gcc pkgconf`.
 2. Clone this fork, then run `./setup-linux.sh`. It installs its own Python 3.10 and CPU inference
    dependencies inside the checkout; it does not change the system Python or require CUDA.
    Optional application-menu shortcut: `python packaging/install_linux_launcher.py`.
@@ -53,8 +53,9 @@ To update, close the app, run `git pull --ff-only`, then `./setup-linux.sh` agai
 installer auto-updater is disabled on Linux.
 
 Linux inference uses the original models and a pinned [YOLOv5-OBB source checkout](https://github.com/hukaixuan19970627/yolov5_obb/tree/b00c3f245e50e7a80460a1b949d22ea7dfeb27a0),
-with OpenCV rotated NMS replacing the Windows/CUDA extension. Hyprland input uses its
-[official dispatchers](https://wiki.hypr.land/Configuring/Basics/Dispatchers/).
+with OpenCV rotated NMS replacing the Windows/CUDA extension. Mouse input uses a persistent [Wayland virtual pointer](https://github.com/swaywm/wlr-protocols/blob/master/unstable/wlr-virtual-pointer-unstable-v1.xml),
+so Proton receives motion events as well as clicks. The helper releases held buttons when its worker exits.
+Global shortcuts use Hyprland's [official dispatchers](https://wiki.hypr.land/Configuring/Basics/Dispatchers/).
 
 Validation commands:
 

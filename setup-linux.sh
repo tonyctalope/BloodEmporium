@@ -28,5 +28,6 @@ if [[ ! -d yolov5_obb ]]; then
 fi
 .venv/bin/python packaging/patch_vendored.py .venv/lib/python3.10/site-packages
 .venv/bin/python packaging/prepare_linux.py
+bash native/build-pointer.sh
 mkdir -p logs output
 echo 'Ready. Run ./run-linux.sh --selfcheck, then ./run-linux.sh'

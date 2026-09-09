@@ -37,3 +37,4 @@ tesseract/
 .python/
 .cache/
 selfcheck.txt
+/.local/

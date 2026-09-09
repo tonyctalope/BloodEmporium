@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install desktop test dependencies
-        run: sudo apt-get update && sudo apt-get install -y python3-venv tesseract-ocr tesseract-ocr-eng xvfb scrot libxcb-xinerama0 libxft2 libxss1
+        run: sudo apt-get update && sudo apt-get install -y python3-venv tesseract-ocr tesseract-ocr-eng xvfb scrot libxcb-xinerama0 libxft2 libxss1 libwayland-dev pkg-config build-essential
       - name: Set up the Linux environment
         run: ./setup-linux.sh
       - name: Regression tests

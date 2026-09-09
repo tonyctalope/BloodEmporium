@@ -10,7 +10,7 @@ import cv2
 import numpy as np
 import torch
 
-from backend.desktop import logical_position, select_monitor, HyprlandDesktop
+from backend.desktop import logical_position, pointer_position, select_monitor, HyprlandDesktop
 from backend.rotated_nms import obb_nms
 from frontend.linux_hotkey import HyprlandHotkey, binding_spec
 
@@ -42,13 +42,29 @@ class MonitorTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             HyprlandDesktop().moveTo(10, 10)
 
-    @patch("backend.desktop.hyprctl")
-    def test_mouse_press_and_release_are_distinct(self, ctl):
+    def test_virtual_pointer_frame_with_negative_origin(self):
+        other = dict(self.monitor, name="HDMI-A-1", x=-1920, y=0, width=1920, height=1080, scale=1)
+        self.assertEqual(pointer_position([other, self.monitor], 2944, 376), (4864, 576, 5888, 1280))
+
+    @patch("backend.desktop.VirtualPointer")
+    def test_mouse_press_and_release_are_distinct(self, pointer):
         desktop = HyprlandDesktop()
         desktop.mouseDown("right", _pause=False)
         desktop.mouseUp("right", _pause=False)
-        self.assertIn('key="mouse:273", state="down"', ctl.call_args_list[0].args[1])
-        self.assertIn('key="mouse:273", state="up"', ctl.call_args_list[1].args[1])
+        self.assertEqual(pointer.return_value.send.call_args_list[0].args, ("button 273 1",))
+        self.assertEqual(pointer.return_value.send.call_args_list[1].args, ("button 273 0",))
+        pointer.assert_called_once() # one persistent device across press and release
+
+    @patch("backend.desktop.hyprctl")
+    @patch("backend.desktop.VirtualPointer")
+    def test_move_emits_a_pointer_event_instead_of_warping_the_cursor(self, pointer, ctl):
+        desktop = HyprlandDesktop()
+        desktop.monitor = self.monitor
+        desktop.image_size = (2560, 1440)
+        ctl.return_value = json.dumps([self.monitor])
+        desktop.moveTo(1280, 720, _pause=False)
+        pointer.return_value.send.assert_called_once_with("absolute 1024 576 2048 1152")
+        ctl.assert_called_once_with("-j", "monitors")
 
 
 class NMSTests(unittest.TestCase):
